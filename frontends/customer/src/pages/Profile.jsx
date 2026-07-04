@@ -9,17 +9,10 @@ import {
 import { useTheme } from '@/lib/ThemeContext';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { getCollectionSync, getCollection, getPoints, generateReferralCode } from '@/api';
+import { getCollection, getPoints, generateReferralCode, getBalance } from '@/api';
 import { requestNotificationPermission } from '@/hooks/usePushNotifications';
 import { useRealtimeQuery as useQuery } from '@/api';
 import { toast } from 'sonner';
-
-function getCustomerWalletBalance(email) {
-  if (!email) return 0;
-  const wallets = getCollectionSync('Wallet');
-  const w = wallets.find((x) => x.owner_email === email && x.owner_type === 'customer');
-  return w ? w.balance : 0;
-}
 
 async function getCustomerTransactions(email) {
   if (!email) return [];
@@ -92,7 +85,11 @@ export default function Profile() {
     enabled: !!user?.email,
   });
 
-  const walletBalance = getCustomerWalletBalance(user?.email);
+  const { data: walletBalance = 0 } = useQuery({
+    queryKey: ['customer-wallet-balance', user?.email],
+    queryFn: () => getBalance(user.email, 'customer'),
+    enabled: !!user?.email,
+  });
   const pts = loyalty.points ?? 0;
 
   return (

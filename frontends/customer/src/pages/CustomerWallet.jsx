@@ -3,20 +3,13 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { useRealtimeQuery as useQuery } from '@/api';
 import { Wallet, ArrowDownLeft, RefreshCw, Gift, Star } from 'lucide-react';
-import { getCollectionSync, getCollection } from '@/api';
+import { getCollection, getBalance } from '@/api';
 import PageHeader from '@/components/layout/PageHeader';
 
 /**
  * Customer wallet — view-only balance and history.
  * Balance changes only via server-side checkout deduction and system refunds.
  */
-function getCustomerWalletBalance(email) {
-  if (!email) return 0;
-  const wallets = getCollectionSync('Wallet');
-  const w = wallets.find((x) => x.owner_email === email && x.owner_type === 'customer');
-  return w ? w.balance : 0;
-}
-
 async function getCustomerTransactions(email) {
   if (!email) return [];
   const txs = await getCollection('Transaction');
@@ -34,7 +27,11 @@ export default function CustomerWallet() {
     enabled: !!user?.email && !isGuest,
   });
 
-  const balance = user ? getCustomerWalletBalance(user.email) : 0;
+  const { data: balance = 0 } = useQuery({
+    queryKey: ['customer-wallet-balance', user?.email],
+    queryFn: () => getBalance(user.email, 'customer'),
+    enabled: !!user?.email && !isGuest,
+  });
   const totalRefunds = txs.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   const cashback = txs.filter((t) => (t.reason || '').toLowerCase().includes('cashback'));
 
