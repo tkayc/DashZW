@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { CheckCircle2, Package, MapPin, Clock } from 'lucide-react';
 import { base44 } from '@/api';
@@ -47,7 +48,7 @@ export default function OrderConfirmation() {
           <div>
             <p className="font-semibold">{order.merchant_name || order.shop_name}</p>
             <p className="text-xs text-muted-foreground">
-              {order.items?.length || 0} item(s) · R{(order.total || 0).toFixed(2)}
+              {order.items?.length || 0} item(s) · {formatUSD((order.total || 0))}
             </p>
           </div>
         </div>

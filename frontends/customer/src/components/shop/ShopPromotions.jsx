@@ -1,3 +1,4 @@
+import { formatUSD } from '@/lib/formatCurrency';
 import React, { useState } from 'react';
 import { useRealtimeQuery as useQuery } from '@/api';
 import { base44 } from '@/api';
@@ -29,7 +30,7 @@ function PromoLabel({ promo }) {
   return (
     <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${cfg.badge}`}>
       {promo.promo_type === 'percentage_discount' && `${promo.discount_value}% OFF`}
-      {promo.promo_type === 'fixed_discount' && `R${promo.discount_value} OFF`}
+      {promo.promo_type === 'fixed_discount' && `${formatUSD(promo.discount_value)} OFF`}
       {promo.promo_type === 'bogo' && 'BUY 1 GET 1'}
       {promo.promo_type === 'free_delivery' && 'FREE DELIVERY'}
       {promo.promo_type === 'coupon_code' && `CODE: ${promo.coupon_code}`}

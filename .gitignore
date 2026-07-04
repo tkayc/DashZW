@@ -35,3 +35,7 @@ Thumbs.db
 coverage/
 .cache/
 *.tsbuildinfo
+
+# Uploaded product images (local dev storage)
+uploads/
+backend/uploads/

@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { useAuth } from '@/lib/AuthContext';
 import { useRealtimeQuery as useQuery } from '@/api';
 import { base44 } from '@/api';
@@ -84,7 +85,7 @@ export default function DriverProfilePage() {
             <h3 className="font-semibold text-foreground">Driver Wallet</h3>
           </div>
           <p className={`text-3xl font-bold ${balance < 0 ? 'text-red-700' : balance > 0 ? 'text-green-700' : 'text-foreground'}`}>
-            R{balance.toFixed(2)}
+            {formatUSD(balance)}
           </p>
         </div>
         {balance < 0 && (
@@ -99,7 +100,7 @@ export default function DriverProfilePage() {
           <p className="text-xs text-muted-foreground mt-1">Top up at a partner shop to accept COD orders.</p>
         )}
         {balance > 0 && (
-          <p className="text-xs text-green-700 mt-1">You can accept COD orders up to R{balance.toFixed(2)}</p>
+          <p className="text-xs text-green-700 mt-1">You can accept COD orders up to {formatUSD(balance)}</p>
         )}
       </div>
 
@@ -107,7 +108,7 @@ export default function DriverProfilePage() {
       <div className="grid grid-cols-3 gap-3">
         {[
           { label: 'Deliveries',   value: delivered.length,             icon: CheckCircle2, color: 'bg-green-50 text-green-600' },
-          { label: 'Total Earned', value: `R${totalEarned.toFixed(2)}`, icon: Wallet,       color: 'bg-primary/10 text-primary' },
+          { label: 'Total Earned', value: `${formatUSD(totalEarned.toFixed(2))}`, icon: Wallet,       color: 'bg-primary/10 text-primary' },
           { label: 'Active',       value: active,                       icon: TrendingUp,   color: 'bg-accent/10 text-accent' },
         ].map(s => (
           <div key={s.label} className="bg-card rounded-2xl border border-border p-4 text-center">

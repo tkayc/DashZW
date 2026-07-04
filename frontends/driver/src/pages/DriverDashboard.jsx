@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { Link } from 'react-router-dom';
 import { useRealtimeQuery as useQuery } from '@/api';
 import { base44 } from '@/api';
@@ -90,17 +91,17 @@ export default function DriverDashboard() {
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-muted-foreground">Today&apos;s earnings</p>
-          <p className="text-2xl font-bold text-green-700">R{todayEarnings.toFixed(2)}</p>
+          <p className="text-2xl font-bold text-green-700">{formatUSD(todayEarnings)}</p>
           <p className="text-[10px] text-muted-foreground mt-1">{todayOrders.length} deliveries</p>
         </div>
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-muted-foreground">Weekly earnings</p>
-          <p className="text-2xl font-bold text-foreground">R{weekEarnings.toFixed(2)}</p>
+          <p className="text-2xl font-bold text-foreground">{formatUSD(weekEarnings)}</p>
           <p className="text-[10px] text-muted-foreground mt-1">{weekOrders.length} deliveries</p>
         </div>
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-muted-foreground">Wallet</p>
-          <p className="text-2xl font-bold text-foreground">R{(balance || 0).toFixed(2)}</p>
+          <p className="text-2xl font-bold text-foreground">{formatUSD((balance || 0))}</p>
           <Link to="/wallet" className="text-[10px] text-primary font-medium">View wallet →</Link>
         </div>
         <div className="bg-card rounded-2xl border border-border p-4">

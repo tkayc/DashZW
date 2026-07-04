@@ -13,6 +13,8 @@ import entityRoutes from './routes/entities.js';
 import domainRoutes from './routes/domain.js';
 import chatRoutes from './routes/chat.js';
 import profileRoutes from './routes/profile.js';
+import uploadRoutes from './routes/uploads.js';
+import { UPLOADS_ROOT } from './services/storage/storage.js';
 import { seedDatabase } from './services/merchant/seedData.js';
 import { runOrderTimeoutCheck } from './services/orders/orderEngine.js';
 import { ensureDemoUsers } from './services/authentication/users.js';
@@ -38,7 +40,8 @@ const ORIGINS = (process.env.CORS_ORIGINS ||
 ).split(',').map((s) => s.trim());
 
 app.use(cors({ origin: ORIGINS, credentials: true }));
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '8mb' }));
+app.use('/uploads', express.static(UPLOADS_ROOT));
 
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -74,6 +77,7 @@ function mountApi(routerBase) {
   app.use(`${routerBase}/domain`, domainRoutes);
   app.use(`${routerBase}/chat`, chatRoutes);
   app.use(`${routerBase}/profile`, profileRoutes);
+  app.use(`${routerBase}/uploads`, uploadRoutes);
 }
 
 mountApi('/api');

@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { useAuth } from '@/lib/AuthContext';
 import { Star } from 'lucide-react';
 import PageHeader from '@/components/layout/PageHeader';
@@ -27,7 +28,7 @@ export default function Loyalty() {
 
   const handleRedeem = () => {
     toast.message('Redeem coming soon', {
-      description: `Earn ${REDEEM_AT} pts to unlock R${REDEEM_VALUE} wallet credit.`,
+      description: `Earn ${REDEEM_AT} pts to unlock ${formatUSD(REDEEM_VALUE)} wallet credit.`,
     });
     // TODO(backend): POST /api/loyalty/redeem
   };
@@ -51,8 +52,8 @@ export default function Loyalty() {
         </div>
         <p className="text-xs text-muted-foreground mb-4">
           {pts >= REDEEM_AT
-            ? `You can redeem R${REDEEM_VALUE} (preview — button below).`
-            : `${toNext} more points for R${REDEEM_VALUE} reward`}
+            ? `You can redeem ${formatUSD(REDEEM_VALUE)} (preview — button below).`
+            : `${toNext} more points for ${formatUSD(REDEEM_VALUE)} reward`}
         </p>
         <button
           type="button"
@@ -67,7 +68,7 @@ export default function Loyalty() {
         <p className="font-semibold text-sm text-foreground">How it works</p>
         <p className="text-xs text-muted-foreground">1 point per R10 spent on completed orders.</p>
         <p className="text-xs text-muted-foreground">
-          {REDEEM_AT} points = R{REDEEM_VALUE} wallet credit.
+          {REDEEM_AT} points = {formatUSD(REDEEM_VALUE)} wallet credit.
         </p>
         <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mt-2">
           Redemption is a placeholder UI. Points already update when orders complete.

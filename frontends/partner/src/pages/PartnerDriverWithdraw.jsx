@@ -1,3 +1,4 @@
+import { formatUSD } from '@/lib/formatCurrency';
 import React, { useState } from 'react';
 import { useAuth } from '@/lib/AuthContext';
 import { useRealtimeQuery as useQuery } from '@/api';
@@ -86,7 +87,7 @@ export default function PartnerDriverWithdraw() {
       const balance = await getBalance(foundDriver.email, 'driver').catch(() => 0);
       setFoundDriver({ ...foundDriver, balance });
       setAmount('');
-      toast.success(`Withdrawal processed! Pay driver R${amt.toFixed(2)} cash.`);
+      toast.success(`Withdrawal processed! Pay driver ${formatUSD(amt.toFixed(2))} cash.`);
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -191,7 +192,7 @@ export default function PartnerDriverWithdraw() {
               className="w-full rounded-xl">
               {processing
                 ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Processing…</>
-                : `Process — Pay Driver R${Math.max(0, parseFloat(amount||0) - 0.50).toFixed(2)} Cash`
+                : `Process — Pay Driver ${formatUSD(Math.max(0, parseFloat(amount||0) - 0.50).toFixed(2))} Cash`
               }
             </Button>
           </>

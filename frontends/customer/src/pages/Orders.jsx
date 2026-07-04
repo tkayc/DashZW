@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { base44 } from '@/api';
 import { useRealtimeQuery as useQuery } from '@/api';
 import { Link, useNavigate } from 'react-router-dom';
@@ -173,7 +174,7 @@ export default function Orders() {
                         : ''}
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {order.items?.length || 0} items · R{(order.total || 0).toFixed(2)}
+                      {order.items?.length || 0} items · {formatUSD((order.total || 0))}
                     </p>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">

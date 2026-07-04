@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import {
@@ -128,7 +129,7 @@ export default function Profile() {
           </div>
           <div className="flex items-center gap-2">
             <p className={`text-lg font-bold ${walletBalance > 0 ? 'text-green-700' : 'text-foreground'}`}>
-              R{walletBalance.toFixed(2)}
+              {formatUSD(walletBalance)}
             </p>
             <ChevronRight className="w-4 h-4 text-muted-foreground" />
           </div>
@@ -143,7 +144,7 @@ export default function Profile() {
                   <p className="text-xs text-foreground line-clamp-1">{tx.reason}</p>
                 </div>
                 <span className="text-xs font-bold text-green-700 shrink-0">
-                  +R{Math.abs(tx.amount).toFixed(2)}
+                  {formatUSDSigned(tx.amount)}
                 </span>
               </div>
             ))}

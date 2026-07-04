@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../services/authentication/middleware.js';
 import { localDb } from '../db/localDb.js';
-import { getCollection } from '../db/store.js';
 import { getPolicy } from './entityPolicy.js';
 
 const COLLECTIONS = Object.keys(localDb.entities);
@@ -18,14 +17,14 @@ function userEmail(user) {
   return (user?.email || '').toLowerCase();
 }
 
-function resolveOwnerEmail(collection, record) {
+async function resolveOwnerEmail(collection, record) {
   if (!record) return null;
   const policy = getPolicy(collection);
   if (policy.resolveOwner === 'shop') {
     const shopId = record.shop_id || record.merchant_id;
-    if (!shopId) return record.owner_email || null;
-    const shop = getCollection('Shop').find((s) => s.id === shopId);
-    return shop?.owner_email?.toLowerCase() || null;
+    if (!shopId) return record.owner_email?.toLowerCase() || null;
+    const shops = await localDb.entities.Shop.filter({ id: shopId }, '-created_date', 1);
+    return shops[0]?.owner_email?.toLowerCase() || null;
   }
   if (policy.ownerField) {
     return (record[policy.ownerField] || '').toLowerCase() || null;
@@ -55,16 +54,13 @@ function roleAllowed(user, policy) {
   return false;
 }
 
-function canReadRecord(user, collection, record) {
+async function canReadRecord(user, collection, record) {
   const policy = getPolicy(collection);
-  if (roleAllowed(user, policy) && (policy.roles || []).includes('admin') && isAdmin(user)) return true;
-  if (roleAllowed(user, policy) && isAdmin(user)) return true;
   if (isAdmin(user)) return true;
-
   if (policy.publicRead) return true;
 
   const email = userEmail(user);
-  const owner = resolveOwnerEmail(collection, record);
+  const owner = await resolveOwnerEmail(collection, record);
   const ownerRead = policy.allowOwnerRW || policy.allowOwnerRead;
   if (ownerRead && owner && owner === email) return true;
 
@@ -89,18 +85,17 @@ function canReadRecord(user, collection, record) {
     }
   }
 
-  // Partner role with full collection role list
   if (roleAllowed(user, policy) && !policy.ownerField && !policy.resolveOwner) return true;
 
   return false;
 }
 
-function canWriteRecord(user, collection, record) {
+async function canWriteRecord(user, collection, record) {
   const policy = getPolicy(collection);
   if (isAdmin(user)) return true;
 
   const email = userEmail(user);
-  const owner = resolveOwnerEmail(collection, record);
+  const owner = await resolveOwnerEmail(collection, record);
   const ownerWrite = policy.allowOwnerRW || policy.allowOwnerWrite;
   if (ownerWrite && owner && owner === email) return true;
 
@@ -131,13 +126,11 @@ function canListCollection(user, collection) {
   return false;
 }
 
-function canCreateInCollection(user, collection, body) {
+async function canCreateInCollection(user, collection, body) {
   const policy = getPolicy(collection);
   if (isAdmin(user)) return true;
-  // Creating: treat body as the new record for ownership checks
   if (policy.allowOwnerRW || policy.allowOwnerWrite) {
-    const owner = resolveOwnerEmail(collection, body);
-    // Force owner fields for customers creating orders/reviews
+    const owner = await resolveOwnerEmail(collection, body);
     if (collection === 'Order') {
       return body.customer_email?.toLowerCase() === userEmail(user) || !body.customer_email;
     }
@@ -145,12 +138,11 @@ function canCreateInCollection(user, collection, body) {
       return !body.customer_email || body.customer_email.toLowerCase() === userEmail(user);
     }
     if (owner && owner === userEmail(user)) return true;
-    // Partner creating MenuItem/Shop for self
     if (isPartner(user) && (policy.resolveOwner === 'shop' || policy.ownerField === 'owner_email')) {
       if (collection === 'Shop' || collection === 'Merchant') {
         return !body.owner_email || body.owner_email.toLowerCase() === userEmail(user);
       }
-      return true; // shop ownership checked via shop_id on write of existing shop items
+      return true;
     }
     if (isDriver(user) && collection === 'DriverIncident') return true;
     if (isDriver(user) && collection === 'DriverProfile') {
@@ -161,8 +153,12 @@ function canCreateInCollection(user, collection, body) {
   return false;
 }
 
-function filterVisible(user, collection, rows) {
-  return rows.filter((r) => canReadRecord(user, collection, r));
+async function filterVisible(user, collection, rows) {
+  const out = [];
+  for (const r of rows) {
+    if (await canReadRecord(user, collection, r)) out.push(r);
+  }
+  return out;
 }
 
 function forbid(res, message = 'Forbidden') {
@@ -176,7 +172,7 @@ router.get('/:collection/list', async (req, res) => {
 
   const { sort = '-created_date', limit = '50' } = req.query;
   const data = await localDb.entities[collection].list(sort, parseInt(limit, 10) || 50);
-  res.json(filterVisible(req.user, collection, data));
+  res.json(await filterVisible(req.user, collection, data));
 });
 
 router.get('/:collection/filter', async (req, res) => {
@@ -187,7 +183,7 @@ router.get('/:collection/filter', async (req, res) => {
   const filters = req.query.filters ? JSON.parse(req.query.filters) : {};
   const { sort = '-created_date', limit = '100' } = req.query;
   const data = await localDb.entities[collection].filter(filters, sort, parseInt(limit, 10) || 100);
-  res.json(filterVisible(req.user, collection, data));
+  res.json(await filterVisible(req.user, collection, data));
 });
 
 router.post('/:collection', async (req, res) => {
@@ -230,17 +226,17 @@ router.post('/:collection', async (req, res) => {
     body.email = req.user.email;
   }
 
-  if (!canCreateInCollection(req.user, collection, body)) {
+  if (!(await canCreateInCollection(req.user, collection, body))) {
     return forbid(res);
   }
 
   // Partner creating catalog items must own the shop
   if (['MenuItem', 'Product', 'Branch', 'MerchantStaff', 'Promotion'].includes(collection) && isPartner(req.user)) {
-    const owner = resolveOwnerEmail(collection, body);
+    const owner = await resolveOwnerEmail(collection, body);
     if (owner && owner !== userEmail(req.user)) return forbid(res);
     if (!owner && (body.shop_id || body.merchant_id)) {
-      const shop = getCollection('Shop').find((s) => s.id === (body.shop_id || body.merchant_id));
-      if (!shop || shop.owner_email?.toLowerCase() !== userEmail(req.user)) return forbid(res);
+      const shops = await localDb.entities.Shop.filter({ id: body.shop_id || body.merchant_id }, '-created_date', 1);
+      if (!shops[0] || shops[0].owner_email?.toLowerCase() !== userEmail(req.user)) return forbid(res);
     }
   }
 
@@ -256,11 +252,10 @@ router.patch('/:collection/:id', async (req, res) => {
     if (!isAdmin(req.user)) return forbid(res, 'Direct wallet/settlement writes are not allowed');
   }
 
-  const existing = (await localDb.entities[collection].filter({ id }, '-created_date', 1))[0]
-    || getCollection(collection).find((r) => r.id === id);
+  const existing = (await localDb.entities[collection].filter({ id }, '-created_date', 1))[0];
   if (!existing) return res.status(404).json({ message: 'Not found' });
 
-  if (!canWriteRecord(req.user, collection, existing)) return forbid(res);
+  if (!(await canWriteRecord(req.user, collection, existing))) return forbid(res);
 
   // Prevent ownership reassignment
   const body = { ...req.body };
@@ -270,6 +265,13 @@ router.patch('/:collection/:id', async (req, res) => {
     delete body.customer_email;
     delete body.owner_type;
     if (collection === 'Wallet') delete body.balance;
+    if (collection === 'Shop' || collection === 'Merchant') {
+      delete body.approval_status;
+      delete body.verification_status;
+      delete body.rating;
+      delete body.rating_count;
+      delete body.owner_user_id;
+    }
   }
 
   const item = await localDb.entities[collection].update(id, body);
@@ -284,9 +286,9 @@ router.delete('/:collection/:id', async (req, res) => {
     if (!isAdmin(req.user)) return forbid(res);
   }
 
-  const existing = getCollection(collection).find((r) => r.id === id);
+  const existing = (await localDb.entities[collection].filter({ id }, '-created_date', 1))[0];
   if (!existing) return res.status(404).json({ message: 'Not found' });
-  if (!canWriteRecord(req.user, collection, existing)) return forbid(res);
+  if (!(await canWriteRecord(req.user, collection, existing))) return forbid(res);
 
   await localDb.entities[collection].delete(id);
   res.json({ id });

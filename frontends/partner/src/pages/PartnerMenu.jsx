@@ -77,7 +77,7 @@ export default function PartnerMenu({ shop }) {
             {catItems.map(item => (
               <div key={item.id} className="flex items-center gap-3 p-4">
                 {item.image_url && (
-                  <img src={item.image_url} alt={item.name} className="w-14 h-14 rounded-xl object-cover shrink-0" />
+                  <img src={item.image_url.startsWith('http') || item.image_url.startsWith('data:') ? item.image_url : `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}${item.image_url}`} alt={item.name} className="w-14 h-14 rounded-xl object-cover shrink-0" />
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">

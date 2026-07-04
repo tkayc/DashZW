@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { useAuth } from '@/lib/AuthContext';
 import { useRealtimeQuery as useQuery } from '@/api';
 import { base44 } from '@/api';
@@ -84,10 +85,10 @@ export default function PartnerEarnings() {
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3">
         {[
-          { icon: DollarSign, label: 'Revenue', value: `R${revenue.toFixed(2)}`, color: 'bg-green-50 text-green-700' },
+          { icon: DollarSign, label: 'Revenue', value: `${formatUSD(revenue.toFixed(2))}`, color: 'bg-green-50 text-green-700' },
           { icon: CheckCircle2, label: 'Orders', value: orderCount, color: 'bg-blue-50 text-blue-700' },
-          { icon: TrendingUp, label: 'Avg Order', value: `R${avgOrder.toFixed(2)}`, color: 'bg-purple-50 text-purple-700' },
-          { icon: Wallet, label: 'Pending Payout', value: `R${walletBalance.toFixed(2)}`, color: 'bg-primary/10 text-primary' },
+          { icon: TrendingUp, label: 'Avg Order', value: `${formatUSD(avgOrder.toFixed(2))}`, color: 'bg-purple-50 text-purple-700' },
+          { icon: Wallet, label: 'Pending Payout', value: `${formatUSD(walletBalance.toFixed(2))}`, color: 'bg-primary/10 text-primary' },
         ].map(s => (
           <div key={s.label} className="bg-card rounded-2xl border border-border p-4">
             <div className={`w-8 h-8 rounded-xl flex items-center justify-center mb-2 ${s.color}`}>
@@ -120,7 +121,7 @@ export default function PartnerEarnings() {
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <p className="font-semibold text-foreground">Wallet Balance</p>
           <p className={`text-lg font-bold ${walletBalance > 0 ? 'text-green-700' : 'text-foreground'}`}>
-            R{walletBalance.toFixed(2)}
+            {formatUSD(walletBalance)}
           </p>
         </div>
         <div className="px-4 py-3 text-xs text-muted-foreground">
@@ -144,7 +145,7 @@ export default function PartnerEarnings() {
                   </p>
                   <p className="text-xs text-muted-foreground">{new Date(s.created_date).toLocaleDateString()}</p>
                 </div>
-                <p className="font-bold text-green-700">R{s.amount.toFixed(2)}</p>
+                <p className="font-bold text-green-700">{formatUSD(s.amount)}</p>
               </div>
             ))}
           </div>
@@ -162,7 +163,7 @@ export default function PartnerEarnings() {
               <div key={i} className="flex items-center justify-between px-4 py-3">
                 <p className="text-xs text-muted-foreground flex-1 pr-2">{tx.reason}</p>
                 <span className={`text-sm font-bold shrink-0 ${tx.amount >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                  {tx.amount >= 0 ? '+' : ''}R{Math.abs(tx.amount).toFixed(2)}
+                  {formatUSDSigned(tx.amount)}
                 </span>
               </div>
             ))}

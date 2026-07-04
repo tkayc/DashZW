@@ -123,7 +123,10 @@ export function createApiClient() {
       const raw = localStorage.getItem('dashzw_user');
       return raw ? JSON.parse(raw) : null;
     },
-    listUsers: async () => apiFetch('/api/auth/users'),
+    listUsers: async () => {
+      const data = await apiFetch('/api/auth/users');
+      return Array.isArray(data) ? data : [];
+    },
     updateUser: async (email, data) =>
       apiFetch(`/api/auth/users/${encodeURIComponent(email)}`, {
         method: 'PATCH',

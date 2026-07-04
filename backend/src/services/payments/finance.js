@@ -73,6 +73,7 @@ import { calcSurgeMultiplier, applySurge } from '../admin/surgePricing.js';
  */
 
 import { getCollection, saveCollection } from '../../db/localDb.js';
+import { isPostgresEnabled, query } from '../../db/pg.js';
 
 export const PLATFORM_PERCENT   = 0.05;   // 5% platform fee on cart
 export const SERVICE_FEE_PER_TIER = 0.15;  // R0.15 per R1.50 delivery fee tier
@@ -150,7 +151,21 @@ function getWalletRow(ownerEmail) {
   return getCollection('Wallet').find(w => w.owner_email === ownerEmail) || null;
 }
 
-export function getBalance(ownerEmail, ownerType = null) {
+export async function getBalance(ownerEmail, ownerType = null) {
+  if (isPostgresEnabled()) {
+    if (ownerType) {
+      const r = await query(
+        `SELECT balance FROM wallets WHERE owner_email = $1 AND owner_type = $2`,
+        [ownerEmail, ownerType]
+      );
+      return r.rows[0] ? Number(r.rows[0].balance) : 0;
+    }
+    const r = await query(
+      `SELECT balance FROM wallets WHERE owner_email = $1 ORDER BY updated_at DESC NULLS LAST LIMIT 1`,
+      [ownerEmail]
+    );
+    return r.rows[0] ? Number(r.rows[0].balance) : 0;
+  }
   if (ownerType) {
     const wallets = getCollection('Wallet');
     const w = wallets.find(w => w.owner_email === ownerEmail && w.owner_type === ownerType);
@@ -160,7 +175,44 @@ export function getBalance(ownerEmail, ownerType = null) {
   return w ? w.balance : 0;
 }
 
-function saveWalletChange(ownerEmail, ownerType, delta, reason, txType = null) {
+async function saveWalletChange(ownerEmail, ownerType, delta, reason, txType = null) {
+  if (isPostgresEnabled()) {
+    const type = ownerType || 'customer';
+    let r = await query(
+      `SELECT * FROM wallets WHERE owner_email = $1 AND owner_type = $2`,
+      [ownerEmail, type]
+    );
+    let w = r.rows[0];
+    if (!w) {
+      const id = 'wal_' + ownerEmail.replace(/[^a-z0-9]/gi, '_');
+      r = await query(
+        `INSERT INTO wallets (id, owner_email, owner_type, balance) VALUES ($1,$2,$3,0) RETURNING *`,
+        [id, ownerEmail, type]
+      );
+      w = r.rows[0];
+    }
+    const balance = parseFloat((Number(w.balance) + delta).toFixed(2));
+    r = await query(
+      `UPDATE wallets SET balance = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [balance, w.id]
+    );
+    w = r.rows[0];
+    await query(
+      `INSERT INTO transactions (id, wallet_id, owner_email, owner_type, amount, type, reason)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [
+        'txn_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        w.id,
+        ownerEmail,
+        type,
+        delta,
+        txType || (delta >= 0 ? 'credit' : 'debit'),
+        reason,
+      ]
+    );
+    return { ...w, balance: Number(w.balance), owner_email: ownerEmail, owner_type: type };
+  }
+
   const wallets = getCollection('Wallet');
   let w = wallets.find(w => w.owner_email === ownerEmail && (!ownerType || w.owner_type === ownerType));
   if (!w) {
@@ -177,7 +229,6 @@ function saveWalletChange(ownerEmail, ownerType, delta, reason, txType = null) {
   w.updated_date = new Date().toISOString();
   saveCollection('Wallet', wallets);
 
-  // Audit trail
   const txs = getCollection('Transaction');
   txs.push({
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
@@ -198,11 +249,11 @@ function saveWalletChange(ownerEmail, ownerType, delta, reason, txType = null) {
  * Internal wallet mutations — not for customer-facing invoke.
  * Customers must never call these via /api/domain/invoke (enforced in domain.js).
  */
-export function creditWallet(email, type, amount, reason, txType = null) {
+export async function creditWallet(email, type, amount, reason, txType = null) {
   return saveWalletChange(email, type, Math.abs(amount), reason, txType || 'credit');
 }
 
-export function debitWallet(email, type, amount, reason, txType = null) {
+export async function debitWallet(email, type, amount, reason, txType = null) {
   return saveWalletChange(email, type, -Math.abs(amount), reason, txType || 'debit');
 }
 
@@ -215,10 +266,9 @@ export function debitWallet(email, type, amount, reason, txType = null) {
  *
  * For online orders, driver never owes anything → always allowed.
  */
-export function canDriverAcceptOrder(driverEmail, order) {
+export async function canDriverAcceptOrder(driverEmail, order) {
   if (order.payment_method !== 'cash_on_delivery') return true;
-  const currentBalance = getBalance(driverEmail);
-  // Debt = customerSubtotal + serviceFee(deliveryFee) (what driver will owe after collecting cash)
+  const currentBalance = await getBalance(driverEmail);
   const serviceFee = calcServiceFee(order.delivery_fee || 0);
   const debt = parseFloat(((order.customer_subtotal || 0) + serviceFee).toFixed(2));
   const projectedBalance = parseFloat((currentBalance - debt).toFixed(2));
@@ -226,8 +276,8 @@ export function canDriverAcceptOrder(driverEmail, order) {
 }
 
 /** Hard block — driver owes too much regardless of new orders */
-export function isDriverBlocked(driverEmail) {
-  return getBalance(driverEmail) <= BLOCK_THRESHOLD;
+export async function isDriverBlocked(driverEmail) {
+  return (await getBalance(driverEmail)) <= BLOCK_THRESHOLD;
 }
 
 // ── Settlement ────────────────────────────────────────────────────────────────
@@ -253,7 +303,7 @@ export function isDriverBlocked(driverEmail) {
  *   - Platform wallet += platformEarning
  *   - Driver wallet += driverEarning
  */
-export function settleOrder(order) {
+export async function settleOrder(order) {
   const {
     id, driver_email, partner_email, payment_method,
     partner_payout, platform_earning, driver_earning,
@@ -264,77 +314,70 @@ export function settleOrder(order) {
   const isCash = payment_method === 'cash_on_delivery';
 
   if (isCash) {
-    // Driver physically collected customerTotal cash from customer.
-    // They OWE: customerSubtotal + serviceFee (platform + partner share)
-    // They KEEP as cash: deliveryFee − serviceFee = driverEarning (already in hand, NOT credited to wallet)
-    //
-    // Wallet movement: 0 − (customerSubtotal + serviceFee) = debt
-    // e.g. $0 − (R21.00 + $0.75) = −R21.75
-    //
-    // Partner + platform then get credited FROM that debt (driver pays them from the cash):
-    // Partner: +R20.00, Platform: +R1.75, total = $21.75 ✓
-
     const driverDebt = parseFloat((customer_subtotal + calcServiceFee(delivery_fee || 0)).toFixed(2));
 
     if (driver_email) {
-      debitWallet(driver_email, 'driver', driverDebt,
-        `COD — owes partner + platform (R${driverDebt.toFixed(2)}) - ${ref}`);
+      await debitWallet(driver_email, 'driver', driverDebt,
+        `COD — owes partner + platform (${driverDebt.toFixed(2)}) - ${ref}`);
     }
 
-    // Platform credited from cash driver holds
-    creditWallet(PLATFORM_EMAIL, 'platform', platform_earning,
+    await creditWallet(PLATFORM_EMAIL, 'platform', platform_earning,
       `Platform fee (5% + service) - ${ref}`);
 
-    // Partner credited from cash driver holds
     if (partner_email) {
-      creditWallet(partner_email, 'partner', partner_payout,
+      await creditWallet(partner_email, 'partner', partner_payout,
         `Product sales - ${ref}`);
     }
 
   } else {
-    // Online — customer already paid, just distribute
     if (partner_email) {
-      creditWallet(partner_email, 'partner',  partner_payout,    `Product sales - ${ref}`);
+      await creditWallet(partner_email, 'partner',  partner_payout,    `Product sales - ${ref}`);
     }
-    creditWallet(PLATFORM_EMAIL,  'platform', platform_earning,  `Platform fee - ${ref}`);
+    await creditWallet(PLATFORM_EMAIL,  'platform', platform_earning,  `Platform fee - ${ref}`);
     if (driver_email) {
-      creditWallet(driver_email,  'driver',   driver_earning,    `Delivery earning - ${ref}`);
+      await creditWallet(driver_email,  'driver',   driver_earning,    `Delivery earning - ${ref}`);
     }
   }
 
-  // Settle any platform promo funding (e.g. free delivery paid from platform wallet)
-  applyPlatformPromoSettlement(order);
+  await applyPlatformPromoSettlement(order);
 
-  // Re-evaluate driver block status
   if (driver_email) {
-    const wasBlocked = _updateDriverBlockStatus(driver_email);
+    const wasBlocked = await _updateDriverBlockStatus(driver_email);
     if (wasBlocked) notifyDriverBlocked(driver_email);
   }
 }
 
-function _updateDriverBlockStatus(driverEmail) {
-  const balance = getBalance(driverEmail);
+async function _updateDriverBlockStatus(driverEmail) {
+  const balance = await getBalance(driverEmail);
   const shouldBlock = balance <= BLOCK_THRESHOLD;
-  const profiles = getCollection('DriverProfile');
-  const idx = profiles.findIndex(p => p.email === driverEmail);
-  if (idx >= 0) {
-    profiles[idx].is_blocked = shouldBlock;
-    profiles[idx].updated_date = new Date().toISOString();
-    saveCollection('DriverProfile', profiles);
+  if (isPostgresEnabled()) {
+    await query(
+      `UPDATE driver_profiles SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb, updated_at = NOW()
+       WHERE email = $2`,
+      [JSON.stringify({ is_blocked: shouldBlock }), driverEmail]
+    );
+  } else {
+    const profiles = getCollection('DriverProfile');
+    const idx = profiles.findIndex(p => p.email === driverEmail);
+    if (idx >= 0) {
+      profiles[idx].is_blocked = shouldBlock;
+      profiles[idx].updated_date = new Date().toISOString();
+      saveCollection('DriverProfile', profiles);
+    }
   }
   return shouldBlock;
 }
 
 /** Top up driver wallet — partner collects cash, credits digitally */
-export function topUpDriver(driverEmail, amount, byEmail) {
-  creditWallet(driverEmail, 'driver', amount, `Top-up by ${byEmail}`);
-  _updateDriverBlockStatus(driverEmail);
+export async function topUpDriver(driverEmail, amount, byEmail) {
+  await creditWallet(driverEmail, 'driver', amount, `Top-up by ${byEmail}`);
+  await _updateDriverBlockStatus(driverEmail);
   return getBalance(driverEmail);
 }
 
 /** Refund unavailable item to customer wallet */
-export function refundToCustomerWallet(customerEmail, amount, reason) {
-  const result = creditWallet(customerEmail, 'customer', amount, reason);
+export async function refundToCustomerWallet(customerEmail, amount, reason) {
+  const result = await creditWallet(customerEmail, 'customer', amount, reason);
   notifyWalletCredited(customerEmail, amount, reason);
   return result;
 }

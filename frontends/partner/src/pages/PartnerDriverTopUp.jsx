@@ -1,3 +1,4 @@
+import { formatUSD } from '@/lib/formatCurrency';
 import React, { useState } from 'react';
 import { Wallet, Search, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -74,7 +75,7 @@ export default function PartnerDriverTopUp() {
     setTopping(true);
     await new Promise(r => setTimeout(r, 400));
     const newBalance = await topUpDriver(foundDriver.email, amt, user?.email);
-    toast.success(`R${amt.toFixed(2)} topped up for ${foundDriver.driverId}`);
+    toast.success(`${formatUSD(amt.toFixed(2))} topped up for ${foundDriver.driverId}`);
     setFoundDriver({ ...foundDriver, balance: newBalance });
     setAmount('');
     setDone(true);
@@ -131,7 +132,7 @@ export default function PartnerDriverTopUp() {
 
         {foundDriver && !done && (
           <Button onClick={handleTopUp} disabled={topping || !amount} className="w-full rounded-xl">
-            {topping ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Processing...</> : `Top Up R${parseFloat(amount || 0).toFixed(2)}`}
+            {topping ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Processing...</> : `Top Up ${formatUSD(parseFloat(amount || 0).toFixed(2))}`}
           </Button>
         )}
 

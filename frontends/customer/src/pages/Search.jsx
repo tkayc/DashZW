@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { useNavigate } from 'react-router-dom';
 import { Search as SearchIcon, X, Package, ArrowLeft, Tag, SlidersHorizontal } from 'lucide-react';
 import { base44 } from '@/api';
@@ -218,7 +219,7 @@ export default function Search() {
           </div>
           <div className="grid grid-cols-2 gap-3 text-[10px] text-muted-foreground">
             <label>
-              Max delivery fee R{filters.maxDeliveryFee >= 99 ? '∞' : filters.maxDeliveryFee}
+              Max delivery fee {formatUSD(filters.maxDeliveryFee >= 99 ? '∞' : filters.maxDeliveryFee)}
               <input
                 type="range"
                 min="1"
@@ -240,7 +241,7 @@ export default function Search() {
               />
             </label>
             <label>
-              Max price R{filters.maxPrice >= 999 ? '∞' : filters.maxPrice}
+              Max price {formatUSD(filters.maxPrice >= 999 ? '∞' : filters.maxPrice)}
               <input
                 type="range"
                 min="20"
@@ -385,7 +386,7 @@ export default function Search() {
                       <p className="font-semibold text-sm">{item.name}</p>
                       <p className="text-xs text-muted-foreground line-clamp-1">{item.category}</p>
                     </div>
-                    <p className="font-bold text-sm text-primary">R{item.price.toFixed(2)}</p>
+                    <p className="font-bold text-sm text-primary">{formatUSD(item.price)}</p>
                   </button>
                 ))}
               </div>

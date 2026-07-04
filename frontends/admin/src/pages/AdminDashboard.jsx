@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { useRealtimeQuery as useQuery } from '@/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { base44 } from '@/api';
@@ -445,7 +446,7 @@ export default function AdminDashboard() {
       const shopName = settleForm.shop.name;
       const paid = settleForm.balance;
       await settlePartnerWallet(ownerEmail, shopName, settleMethod, settleRef, 'admin@dashzw.com');
-      toast.success(`${shopName} settled — R${paid.toFixed(2)} paid via ${settleMethod.toUpperCase()}`);
+      toast.success(`${shopName} settled — ${formatUSD(paid.toFixed(2))} paid via ${settleMethod.toUpperCase()}`);
       setSettleForm(null);
       setSettleRef('');
       setSettlements(await getSettlements());
@@ -531,7 +532,7 @@ export default function AdminDashboard() {
         {activeTab === 'overview' && (
           <>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <StatCard icon={DollarSign}  label="Total Earnings"  value={`R${totalRevenue.toFixed(2)}`} sub={`R${todayRevenue.toFixed(2)} today`} color="bg-green-50 text-green-700" />
+              <StatCard icon={DollarSign}  label="Total Earnings"  value={`${formatUSD(totalRevenue.toFixed(2))}`} sub={`${formatUSD(todayRevenue.toFixed(2))} today`} color="bg-green-50 text-green-700" />
               <StatCard icon={Store}       label="Active Shops"    value={approvedShops.length}           sub={`${pendingShops.length} pending`}     color="bg-blue-50 text-blue-700" />
               <StatCard icon={ShoppingBag} label="Total Orders"    value={orders.length}                  sub={`${activeOrders.length} active`}      color="bg-purple-50 text-purple-700" />
               <StatCard icon={CheckCircle2}label="Delivered"       value={deliveredOrders.length}         sub={`${todayOrders.length} today`}        color="bg-primary/10 text-primary" />
@@ -578,7 +579,7 @@ export default function AdminDashboard() {
                     <p className="text-xs text-orange-700 mt-1">
                       This is money drivers collected as cash on delivery that they still owe the platform.
                       It flows in when drivers do withdrawals or top-ups at partner shops.
-                      Your platform wallet balance of R${platformBalance.toFixed(2)} includes COD earnings already credited digitally.
+                      Your platform wallet balance of ${formatUSD(platformBalance.toFixed(2))} includes COD earnings already credited digitally.
                       The actual cash arrives via driver wallet top-ups.
                     </p>
                   </div>
@@ -885,8 +886,8 @@ export default function AdminDashboard() {
                           <p className="text-xs text-muted-foreground mt-1">{typeInfo?.label}</p>
                           {promo.promo_type !== 'free_delivery' && promo.discount_value && (
                             <p className="text-xs text-primary font-medium mt-0.5">
-                              {promo.discount_type === 'percentage' ? `${promo.discount_value}% off` : `R${promo.discount_value} off`}
-                              {promo.min_order_amount ? ` · min R${promo.min_order_amount}` : ''}
+                              {promo.discount_type === 'percentage' ? `${promo.discount_value}% off` : `${formatUSD(promo.discount_value)} off`}
+                              {promo.min_order_amount ? ` · min ${formatUSD(promo.min_order_amount)}` : ''}
                             </p>
                           )}
                           {promo.promo_type === 'free_delivery' && (
@@ -1024,7 +1025,7 @@ export default function AdminDashboard() {
                 </p>
                 {currentSurge.active && (
                   <p className="text-xs text-orange-600 mt-0.5">
-                    Example: R10.00 delivery → R{(10 * currentSurge.multiplier).toFixed(2)} with surge
+                    Example: R10.00 delivery → {formatUSD((10 * currentSurge.multiplier))} with surge
                   </p>
                 )}
               </div>

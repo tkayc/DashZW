@@ -12,7 +12,8 @@ const SECTIONS = [
     icon: Map,
     fields: [
       { key: 'countries', label: 'Countries', value: 'ZW, ZA' },
-      { key: 'currencies', label: 'Currencies', value: 'USD, ZWG, ZAR' },
+      { label: 'Countries', value: 'United States (default)' },
+      { key: 'currencies', label: 'Currencies', value: 'USD' },
       { key: 'languages', label: 'Languages', value: 'en, sn, nd' },
     ],
   },

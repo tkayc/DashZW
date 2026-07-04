@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { useRealtimeQuery as useQuery } from '@/api';
@@ -56,7 +57,7 @@ export default function CustomerWallet() {
           <Wallet className="w-4 h-4" />
           <span className="text-sm">Available balance</span>
         </div>
-        <p className="text-4xl font-bold">R{balance.toFixed(2)}</p>
+        <p className="text-4xl font-bold">{formatUSD(balance)}</p>
         <p className="text-xs opacity-70 mt-1">Wallet balance is used automatically at checkout</p>
       </div>
 
@@ -70,7 +71,7 @@ export default function CustomerWallet() {
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div className="bg-card rounded-2xl border border-border p-4 text-center">
           <ArrowDownLeft className="w-4 h-4 text-green-600 mx-auto mb-1" />
-          <p className="text-lg font-bold">R{totalRefunds.toFixed(2)}</p>
+          <p className="text-lg font-bold">{formatUSD(totalRefunds)}</p>
           <p className="text-[10px] text-muted-foreground">Refunds</p>
         </div>
         <div className="bg-card rounded-2xl border border-border p-4 text-center">
@@ -122,7 +123,7 @@ export default function CustomerWallet() {
                     tx.amount >= 0 ? 'text-green-700' : 'text-red-600'
                   }`}
                 >
-                  {tx.amount >= 0 ? '+' : ''}R{Math.abs(tx.amount).toFixed(2)}
+                  {formatUSDSigned(tx.amount)}
                 </span>
               </div>
             ))}

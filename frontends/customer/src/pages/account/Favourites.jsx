@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { Link } from 'react-router-dom';
 import { Heart } from 'lucide-react';
 import PageHeader from '@/components/layout/PageHeader';
@@ -101,7 +102,7 @@ export default function Favourites() {
                   className="flex-1 min-w-0"
                 >
                   <p className="font-semibold text-sm truncate">{p.name}</p>
-                  <p className="text-xs text-primary font-bold">R{p.price?.toFixed(2)}</p>
+                  <p className="text-xs text-primary font-bold">{formatUSD(p.price)}</p>
                 </Link>
                 <button
                   type="button"

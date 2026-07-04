@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { base44 } from '@/api';
+import { useRealtimeQuery as useQuery } from '@/api';
+import { useAuth } from '@/lib/AuthContext';
 import {
   User, Store, Bike, Shield, Search, CheckCircle2, XCircle,
-  ChevronDown, ChevronUp, KeyRound, History, X
+  ChevronDown, ChevronUp, KeyRound, History, X, Loader2
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -97,7 +100,7 @@ function UserDetailDrawer({ user, onClose, onRefresh }) {
             </div>
             <div className={`rounded-xl p-3 ${balance < 0 ? 'bg-red-50' : 'bg-green-50'}`}>
               <p className={`text-lg font-bold ${balance < 0 ? 'text-red-700' : 'text-green-700'}`}>
-                R{balance.toFixed(2)}
+                {formatUSD(balance)}
               </p>
               <p className="text-[10px] text-muted-foreground">Wallet</p>
             </div>
@@ -192,7 +195,7 @@ function UserDetailDrawer({ user, onClose, onRefresh }) {
                       </p>
                     </div>
                     <span className="text-xs font-bold shrink-0 text-foreground">
-                      R{o.total?.toFixed(2)}
+                      {formatUSD(o.total)}
                     </span>
                   </div>
                 ))}
@@ -207,14 +210,24 @@ function UserDetailDrawer({ user, onClose, onRefresh }) {
 
 // ── Main Panel ────────────────────────────────────────────────────────────────
 export default function AdminUsersPanel() {
-  const [users, setUsers]         = useState([]);
+  const { isAuthenticated } = useAuth();
   const [balances, setBalances]   = useState({});
   const [query, setQuery]         = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [selectedUser, setSelectedUser] = useState(null);
 
-  const refresh = () => base44.auth.listUsers().then(setUsers);
-  useEffect(() => { refresh(); }, []);
+  const {
+    data: users = [],
+    isLoading,
+    isError,
+    error,
+    refetch: refresh,
+  } = useQuery({
+    queryKey: ['admin-users-panel'],
+    queryFn: () => base44.auth.listUsers(),
+    enabled: isAuthenticated,
+    retry: 2,
+  });
 
   useEffect(() => {
     if (!users.length) return;
@@ -246,6 +259,24 @@ export default function AdminUsersPanel() {
 
   return (
     <div className="space-y-4">
+      {isLoading && (
+        <div className="flex items-center gap-2 text-muted-foreground py-8 justify-center">
+          <Loader2 className="w-5 h-5 animate-spin" /> Loading users…
+        </div>
+      )}
+
+      {isError && (
+        <div className="bg-card rounded-2xl border border-destructive/30 p-6 text-center space-y-2">
+          <p className="font-semibold text-foreground">Could not load users</p>
+          <p className="text-sm text-muted-foreground">{error?.message}</p>
+          <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => refresh()}>
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {!isLoading && !isError && (
+      <>
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="font-bold text-foreground text-lg">User Management</h2>
@@ -314,7 +345,7 @@ export default function AdminUsersPanel() {
                 </div>
                 <p className="text-xs text-muted-foreground truncate">{user.email}</p>
                 <p className="text-[10px] text-muted-foreground mt-0.5">
-                  {count} orders · R{balance.toFixed(2)} wallet
+                  {count} orders · {formatUSD(balance)} wallet
                 </p>
               </div>
               <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0 rotate-[-90deg]" />
@@ -337,6 +368,8 @@ export default function AdminUsersPanel() {
           onClose={() => setSelectedUser(null)}
           onRefresh={refresh}
         />
+      )}
+      </>
       )}
     </div>
   );

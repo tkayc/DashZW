@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { MapPin, Phone, PackageCheck, ClipboardList, Map, KeyRound, Loader2, Navigation, Camera, PenLine } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { formatUSD } from '@/lib/formatCurrency';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import DeliveryMap from '@/components/map/DeliveryMap';
@@ -198,7 +199,7 @@ export default function DriverActiveDeliveries() {
   const { user } = useAuth();
   const qc = useQueryClient();
 
-  const { data: orders = [], isLoading } = useQuery({
+  const { data: orders = [], isLoading, isError, error, refetch } = useQuery({
     queryKey: ['driver-active', user?.email],
     queryFn: () => base44.entities.Order.filter({ driver_email: user.email }, '-created_date', 100),
     enabled: !!user?.email,
@@ -238,6 +239,16 @@ export default function DriverActiveDeliveries() {
 
   if (isLoading) return <div className="space-y-3">{[1,2].map(i=><div key={i} className="h-48 bg-muted rounded-2xl animate-pulse"/>)}</div>;
 
+  if (isError) {
+    return (
+      <div className="bg-card rounded-2xl border border-destructive/30 p-8 text-center space-y-3">
+        <p className="font-bold text-foreground">Could not load deliveries</p>
+        <p className="text-sm text-muted-foreground">{error?.message || 'Check that the API is running'}</p>
+        <button type="button" onClick={() => refetch()} className="text-sm font-semibold text-primary">Try again</button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
       <div>
@@ -265,7 +276,7 @@ export default function DriverActiveDeliveries() {
               <div key={order.id} className="bg-card rounded-2xl border border-border p-4 flex items-center justify-between opacity-70">
                 <div>
                   <p className="font-semibold text-sm text-foreground">{order.customer_name || 'Customer'}</p>
-                  <p className="text-xs text-muted-foreground">{order.shop_name} · {format(new Date(order.created_date), 'HH:mm')}</p>
+                  <p className="text-xs text-muted-foreground">{order.shop_name} · {order.created_date ? format(new Date(order.created_date), 'HH:mm') : '—'}</p>
                 </div>
                 <div className="text-right">
                   <p className="font-bold text-sm text-green-700">+${order.driver_earning?.toFixed(2) || '—'}</p>

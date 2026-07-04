@@ -22,7 +22,8 @@ import {
   isProductFavourite,
   toggleProductFavourite,
 } from '@/lib/favourites';
-import { toast } from 'sonner';
+import { getApiBaseUrl } from '@/api';
+import { formatUSD } from '@/lib/formatCurrency';
 
 /**
  * Product detail — variants, add-ons, stock, prep time, favourites, share, related.
@@ -63,14 +64,17 @@ export default function ProductDetail() {
     enabled: !!shopId && !!productId,
   });
 
-  const variants = useMemo(
-    () => (product ? getMockVariants(product, shop?.category) : []),
-    [product, shop?.category]
-  );
-  const addons = useMemo(
-    () => (product ? getMockAddons(product, shop?.category) : []),
-    [product, shop?.category]
-  );
+  const variants = useMemo(() => {
+    if (!product) return [];
+    if (product.variants?.length) return product.variants.filter((v) => v.is_available !== false);
+    return getMockVariants(product, shop?.category);
+  }, [product, shop?.category]);
+
+  const addons = useMemo(() => {
+    if (!product) return [];
+    if (product.addons?.length) return product.addons.filter((a) => a.is_available !== false);
+    return getMockAddons(product, shop?.category);
+  }, [product, shop?.category]);
 
   const selectedVariant = variants.find((v) => v.id === (variantId || variants[0]?.id)) || variants[0];
   const selectedAddons = addons.filter((a) => addonIds.includes(a.id));
@@ -87,7 +91,17 @@ export default function ProductDetail() {
   const nutrition = product ? getMockNutrition(product) : null;
   const allergens = product ? getMockAllergens(product, shop?.category) : [];
   const reviews = product ? getMockProductReviews(product.id) : [];
-  const images = product ? getMockProductImages(product) : [];
+  const images = useMemo(() => {
+    if (!product) return [];
+    const urls = product.image_urls?.length ? product.image_urls : product.image_url ? [product.image_url] : [];
+    if (urls.length) {
+      return urls.map((url, i) => ({
+        id: `img_${i}`,
+        url: url.startsWith('http') || url.startsWith('data:') ? url : `${getApiBaseUrl()}${url}`,
+      }));
+    }
+    return getMockProductImages(product);
+  }, [product]);
   const cat = getMerchantCategory(shop?.category);
   const shopStatus = shop ? getShopStatus(shop) : { isOpen: true };
   const canOrder = shopStatus.isOpen && stock.inStock;
@@ -208,7 +222,7 @@ export default function ProductDetail() {
         <div>
           <div className="flex items-start justify-between gap-2">
             <h1 className="text-xl font-bold text-foreground">{product.name}</h1>
-            <p className="text-lg font-bold text-primary shrink-0">R{unitPrice.toFixed(2)}</p>
+            <p className="text-lg font-bold text-primary shrink-0">{formatUSD(unitPrice)}</p>
           </div>
           <p className="text-xs text-muted-foreground mt-1">
             {cat?.label} ·{' '}
@@ -256,7 +270,7 @@ export default function ProductDetail() {
                   >
                     <span className="text-sm font-medium">{v.name}</span>
                     <span className="text-xs text-muted-foreground">
-                      {v.priceDelta > 0 ? `+R${v.priceDelta.toFixed(2)}` : 'Included'}
+                      {v.priceDelta > 0 ? `+${formatUSD(v.priceDelta)}` : 'Included'}
                     </span>
                   </button>
                 );
@@ -290,7 +304,7 @@ export default function ProductDetail() {
                       </span>
                       {a.name}
                     </span>
-                    <span className="text-xs text-muted-foreground">+R{a.price.toFixed(2)}</span>
+                    <span className="text-xs text-muted-foreground">+{formatUSD(a.price)}</span>
                   </button>
                 );
               })}
@@ -375,7 +389,7 @@ export default function ProductDetail() {
             onClick={handleAdd}
             className="flex-1 h-12 rounded-2xl font-semibold"
           >
-            Add · R{(unitPrice * qty).toFixed(2)}
+            Add · {formatUSD((unitPrice * qty))}
           </Button>
         </div>
 
@@ -390,7 +404,7 @@ export default function ProductDetail() {
                   className="bg-card border border-border/50 rounded-2xl p-3 hover:bg-muted/40"
                 >
                   <p className="text-sm font-semibold line-clamp-1">{r.name}</p>
-                  <p className="text-xs text-primary font-bold mt-1">R{r.price?.toFixed(2)}</p>
+                  <p className="text-xs text-primary font-bold mt-1">{formatUSD(r.price)}</p>
                 </Link>
               ))}
             </div>

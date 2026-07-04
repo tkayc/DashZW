@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { useRealtimeQuery as useQuery } from '@/api';
 import { base44 } from '@/api';
 import { Package, AlertTriangle, Search, Barcode, Layers } from 'lucide-react';
@@ -137,7 +138,7 @@ export default function PartnerInventory({ shop }) {
                 </p>
               </div>
               <div className="text-right shrink-0">
-                <p className="font-bold text-sm">R{(item.price || 0).toFixed(2)}</p>
+                <p className="font-bold text-sm">{formatUSD((item.price || 0))}</p>
                 {item.stockStatus === 'out' && (
                   <Badge className="bg-red-100 text-red-700 text-[10px]">Out of stock</Badge>
                 )}

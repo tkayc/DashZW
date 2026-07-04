@@ -23,18 +23,15 @@ import {
 } from '../../domain/orderStates.js';
 
 // ── Auto-cancel ───────────────────────────────────────────────────────────────
-export function runOrderTimeoutCheck() {
-  const orders = getCollection('Order');
-  const now    = Date.now();
-  let changed  = false;
+export async function runOrderTimeoutCheck() {
+  const orders = await localDb.entities.Order.list('-created_date', 200);
+  const now = Date.now();
 
-  const updated = orders.map(order => {
-    if (!isAwaitingMerchantAcceptance(order.status)) return order;
+  for (const order of orders) {
+    if (!isAwaitingMerchantAcceptance(order.status)) continue;
     const age = now - new Date(order.created_date).getTime();
-    if (age < 10 * 60 * 1000) return order; // < 10 min
+    if (age < 10 * 60 * 1000) continue;
 
-    // Auto-cancel
-    changed = true;
     const merchantName = order.merchant_name || order.shop_name;
     createNotification({
       recipient_email: order.customer_email,
@@ -43,28 +40,22 @@ export function runOrderTimeoutCheck() {
       type: 'order_cancelled',
       link: '/orders',
     });
-    // Refund to wallet for online payments
     if (order.payment_method !== 'cash_on_delivery' && order.total > 0) {
-      creditWallet(order.customer_email, 'customer', order.total,
+      await creditWallet(order.customer_email, 'customer', order.total,
         `Refund — auto-cancelled order from ${merchantName}`);
       createNotification({
         recipient_email: order.customer_email,
-        title: `💰 Refund R${order.total?.toFixed(2)}`,
+        title: `💰 Refund ${order.total?.toFixed(2)}`,
         body: `Your payment for the cancelled order has been refunded to your wallet.`,
         type: 'wallet_credited',
         link: '/profile',
       });
     }
-    return {
-      ...order,
+    await localDb.entities.Order.update(order.id, {
       status: ORDER_STATUS.CANCELLED,
       cancel_reason: 'timeout',
-      updated_date: new Date().toISOString(),
-    };
-  });
-
-  if (changed) saveCollection('Order', updated);
-  return changed;
+    });
+  }
 }
 
 // ── ETA ───────────────────────────────────────────────────────────────────────
@@ -109,7 +100,7 @@ export function getPoints(email) {
   return all.find(p => p.email === email) || { email, points: 0, lifetime: 0 };
 }
 
-export function awardPoints(email, orderTotal) {
+export async function awardPoints(email, orderTotal) {
   const pts   = Math.floor(orderTotal * POINTS_PER_R);
   if (pts <= 0) return;
   const all   = getCollection(POINTS_KEY);
@@ -130,11 +121,10 @@ export function awardPoints(email, orderTotal) {
     link: '/profile',
   });
 
-  // Auto-redeem if >= 100 pts
-  checkAndRedeemPoints(email);
+  await checkAndRedeemPoints(email);
 }
 
-export function checkAndRedeemPoints(email) {
+export async function checkAndRedeemPoints(email) {
   const all = getCollection(POINTS_KEY);
   const idx = all.findIndex(p => p.email === email);
   if (idx < 0) return;
@@ -147,12 +137,12 @@ export function checkAndRedeemPoints(email) {
   all[idx].points -= sets * REDEEM_AT;
   saveCollection(POINTS_KEY, all);
 
-  creditWallet(email, 'customer', credit,
+  await creditWallet(email, 'customer', credit,
     `Loyalty reward — ${sets * REDEEM_AT} points redeemed`);
   createNotification({
     recipient_email: email,
-    title: `🎁 R${credit} Loyalty Reward!`,
-    body: `${sets * REDEEM_AT} points redeemed → R${credit} added to your wallet.`,
+    title: `🎁 ${credit} Loyalty Reward!`,
+    body: `${sets * REDEEM_AT} points redeemed → ${credit} added to your wallet.`,
     type: 'wallet_credited',
     link: '/profile',
   });
@@ -166,7 +156,7 @@ export function generateReferralCode(email) {
   return 'REF' + email.replace(/[^a-z0-9]/gi,'').toUpperCase().slice(0,6);
 }
 
-export function applyReferral(newUserEmail, referralCode) {
+export async function applyReferral(newUserEmail, referralCode) {
   const users = getCollection('Referral');
   if (users.some(r => r.referred_email === newUserEmail)) return; // already applied
 
@@ -176,9 +166,9 @@ export function applyReferral(newUserEmail, referralCode) {
   if (!referrer || referrer.email === newUserEmail) return;
 
   // Credit both
-  creditWallet(referrer.email, 'customer', REFERRAL_CREDIT,
+  await creditWallet(referrer.email, 'customer', REFERRAL_CREDIT,
     `Referral bonus — ${newUserEmail} joined`);
-  creditWallet(newUserEmail, 'customer', REFERRAL_CREDIT,
+  await creditWallet(newUserEmail, 'customer', REFERRAL_CREDIT,
     `Welcome bonus — referral code applied`);
 
   users.push({
@@ -216,14 +206,14 @@ export async function placeOrder(user, payload = {}) {
   }
 
   const useWallet = payload.use_wallet !== false;
-  const balance = getBalance(user.email, 'customer');
+  const balance = await getBalance(user.email, 'customer');
   const walletApplied = useWallet
     ? parseFloat(Math.min(balance, totalBeforeWallet).toFixed(2))
     : 0;
   const finalTotal = parseFloat(Math.max(0, totalBeforeWallet - walletApplied).toFixed(2));
 
   if (walletApplied > 0) {
-    debitWallet(
+    await debitWallet(
       user.email,
       'customer',
       walletApplied,
@@ -255,7 +245,7 @@ export async function placeOrder(user, payload = {}) {
     order,
     wallet_applied: walletApplied,
     total: finalTotal,
-    wallet_balance_after: getBalance(user.email, 'customer'),
+    wallet_balance_after: await getBalance(user.email, 'customer'),
   };
 }
 
@@ -264,10 +254,9 @@ export async function placeOrder(user, payload = {}) {
  */
 export async function cancelOwnOrder(user, orderId) {
   if (!user?.email) throw new Error('Not authenticated');
-  const orders = getCollection('Order');
-  const idx = orders.findIndex((o) => o.id === orderId);
-  if (idx < 0) throw new Error('Order not found');
-  const order = orders[idx];
+  const found = await localDb.entities.Order.filter({ id: orderId }, '-created_date', 1);
+  const order = found[0];
+  if (!order) throw new Error('Order not found');
   if (order.customer_email?.toLowerCase() !== user.email.toLowerCase()) {
     throw new Error('Forbidden');
   }
@@ -278,20 +267,17 @@ export async function cancelOwnOrder(user, orderId) {
   const age = (Date.now() - new Date(order.created_date).getTime()) / 1000;
   if (age > 120) throw new Error('Cancel window expired');
 
-  orders[idx] = {
-    ...order,
+  await localDb.entities.Order.update(orderId, {
     status: ORDER_STATUS.CANCELLED,
     cancel_reason: 'customer',
-    updated_date: new Date().toISOString(),
-  };
-  saveCollection('Order', orders);
+  });
 
   let refunded = 0;
   if (order.payment_method !== 'cash_on_delivery') {
     // Refund amount paid (total) + wallet portion used
     refunded = parseFloat(((order.total || 0) + (order.wallet_applied || 0)).toFixed(2));
     if (refunded > 0) {
-      creditWallet(
+      await creditWallet(
         user.email,
         'customer',
         refunded,
@@ -301,7 +287,7 @@ export async function cancelOwnOrder(user, orderId) {
     }
   } else if (order.wallet_applied > 0) {
     refunded = order.wallet_applied;
-    creditWallet(
+    await creditWallet(
       user.email,
       'customer',
       refunded,
@@ -312,7 +298,7 @@ export async function cancelOwnOrder(user, orderId) {
 
   createNotification({
     recipient_email: user.email,
-    title: refunded > 0 ? `💰 Refund R${refunded.toFixed(2)}` : 'Order cancelled',
+    title: refunded > 0 ? `💰 Refund ${refunded.toFixed(2)}` : 'Order cancelled',
     body: refunded > 0
       ? `Your payment has been refunded to your DashZW wallet.`
       : `Your order was cancelled.`,
@@ -320,16 +306,17 @@ export async function cancelOwnOrder(user, orderId) {
     link: '/wallet',
   });
 
-  return orders[idx];
+  return { ...order, status: ORDER_STATUS.CANCELLED, cancel_reason: 'customer' };
 }
 
 /**
  * Customer-initiated refund for order line adjustments (replacement/remove).
  * Validates order ownership — does not allow arbitrary self-credits.
  */
-export function creditCustomerRefundForAdjustment(user, orderId, amount, reason) {
+export async function creditCustomerRefundForAdjustment(user, orderId, amount, reason) {
   if (!user?.email) throw new Error('Not authenticated');
-  const order = getCollection('Order').find((o) => o.id === orderId);
+  const found = await localDb.entities.Order.filter({ id: orderId }, '-created_date', 1);
+  const order = found[0];
   if (!order || order.customer_email?.toLowerCase() !== user.email.toLowerCase()) {
     throw new Error('Forbidden');
   }
@@ -340,3 +327,5 @@ export function creditCustomerRefundForAdjustment(user, orderId, amount, reason)
   }
   return creditWallet(user.email, 'customer', amt, reason || `Order adjustment — #${orderId}`, 'order_adjustment_refund');
 }
+
+// creditCustomerRefundForAdjustment is async via creditWallet return

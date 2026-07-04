@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -53,7 +54,7 @@ export default function MenuItemCard({ item, shop }) {
           )}
         </div>
         <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{item.description}</p>
-        <p className="font-bold text-sm text-foreground mt-2">R{item.price?.toFixed(2)}</p>
+        <p className="font-bold text-sm text-foreground mt-2">{formatUSD(item.price)}</p>
       </div>
 
       <div className="flex flex-col items-end justify-between shrink-0" onClick={(e) => e.stopPropagation()}>

@@ -104,11 +104,11 @@ export function getPartnerSettlements(partnerEmail) {
     .sort((a,b) => new Date(b.created_date) - new Date(a.created_date));
 }
 
-export function settlePartnerWallet(partnerEmail, shopName, method, reference, adminEmail) {
-  const balance = getBalance(partnerEmail);
+export async function settlePartnerWallet(partnerEmail, shopName, method, reference, adminEmail) {
+  const balance = await getBalance(partnerEmail);
   if (balance <= 0) throw new Error('Nothing to settle — balance is R0 or negative.');
 
-  debitWallet(partnerEmail, 'partner', balance,
+  await debitWallet(partnerEmail, 'partner', balance,
     `Settlement by admin — ${method.toUpperCase()} ref: ${reference}`);
 
   const record = {
@@ -123,7 +123,7 @@ export function settlePartnerWallet(partnerEmail, shopName, method, reference, a
   createNotification({
     recipient_email: partnerEmail,
     title: '💳 Wallet Settled',
-    body: `R${balance.toFixed(2)} paid to you via ${method.toUpperCase()} (ref: ${reference}). Wallet reset to $0.`,
+    body: `${balance.toFixed(2)} paid to you via ${method.toUpperCase()} (ref: ${reference}). Wallet reset to $0.`,
     type: 'wallet_credited', link: '/partner',
   });
   return record;
@@ -154,31 +154,28 @@ export function getAllWithdrawals() {
  *
  * Verification: (X − 0.50) + 0.30 + 0.20 = X ✓
  */
-export function driverWithdraw({ driverEmail, driverName, partnerEmail, shopName, amount }) {
+export async function driverWithdraw({ driverEmail, driverName, partnerEmail, shopName, amount }) {
   if (amount <= 0) throw new Error('Amount must be positive.');
-  const balance = getBalance(driverEmail);
+  const balance = await getBalance(driverEmail);
 
   if (balance < amount) {
     throw new Error(
-      `Insufficient balance. Wallet: R${balance.toFixed(2)}, requested: R${amount.toFixed(2)}.`
+      `Insufficient balance. Wallet: ${balance.toFixed(2)}, requested: ${amount.toFixed(2)}.`
     );
   }
 
   const cashToDriver   = parseFloat((amount - WITHDRAWAL_FEE).toFixed(2));
   if (cashToDriver <= 0) {
-    throw new Error(`Withdrawal amount must be more than the R${WITHDRAWAL_FEE} fee.`);
+    throw new Error(`Withdrawal amount must be more than the ${WITHDRAWAL_FEE} fee.`);
   }
 
-  // Debit full amount from driver wallet
-  debitWallet(driverEmail, 'driver', amount,
-    `Withdrawal R${cashToDriver.toFixed(2)} + R${WITHDRAWAL_FEE} fee at ${shopName}`);
+  await debitWallet(driverEmail, 'driver', amount,
+    `Withdrawal ${cashToDriver.toFixed(2)} + ${WITHDRAWAL_FEE} fee at ${shopName}`);
 
-  // Credit platform $0.30
-  creditWallet(PLATFORM_EMAIL, 'platform', FEE_TO_PLATFORM,
+  await creditWallet(PLATFORM_EMAIL, 'platform', FEE_TO_PLATFORM,
     `Withdrawal fee (platform) — ${driverName} at ${shopName}`);
 
-  // Credit partner $0.20
-  creditWallet(partnerEmail, 'partner', FEE_TO_PARTNER,
+  await creditWallet(partnerEmail, 'partner', FEE_TO_PARTNER,
     `Withdrawal fee (shop share) — ${driverName}`);
 
   const record = {
@@ -203,7 +200,7 @@ export function driverWithdraw({ driverEmail, driverName, partnerEmail, shopName
   createNotification({
     recipient_email: driverEmail,
     title: '💵 Withdrawal Processed',
-    body: `You withdrew R${amount.toFixed(2)} at ${shopName}. Received: R${cashToDriver.toFixed(2)} cash (after R${WITHDRAWAL_FEE} fee). New balance: R${(balance - amount).toFixed(2)}`,
+    body: `You withdrew ${amount.toFixed(2)} at ${shopName}. Received: ${cashToDriver.toFixed(2)} cash (after ${WITHDRAWAL_FEE} fee). New balance: ${(balance - amount).toFixed(2)}`,
     type: 'wallet_credited', link: '/driver/profile',
   });
 

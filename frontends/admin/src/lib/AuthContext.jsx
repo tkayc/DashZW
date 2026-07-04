@@ -4,6 +4,10 @@ import { base44, cacheUser, getToken, setToken, preloadCollections } from '@/api
 const AuthContext = createContext();
 const REQUIRED_ROLE = 'admin';
 
+function isAdminRole(role) {
+  return role === 'admin' || role === 'super_admin';
+}
+
 async function safePreload(keys) {
   try {
     await preloadCollections(keys);
@@ -25,7 +29,7 @@ export const AuthProvider = ({ children }) => {
       }
       try {
         const u = await base44.auth.me();
-        if (u.role !== REQUIRED_ROLE) {
+        if (!isAdminRole(u.role)) {
           setToken(null);
           cacheUser(null);
           setIsLoadingAuth(false);
@@ -45,7 +49,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     const u = await base44.auth.login(email, password);
-    if (u.role !== REQUIRED_ROLE) {
+    if (!isAdminRole(u.role)) {
       setToken(null);
       cacheUser(null);
       throw new Error('This account is not a manager. Use the admin dashboard.');

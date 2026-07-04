@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { base44 } from '@/api';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, MapPin, CreditCard, Loader2, Tag, CheckCircle2, X, LocateFixed } from 'lucide-react';
@@ -259,7 +260,7 @@ export default function Checkout() {
 
   const handlePlaceOrder = async () => {
     if (shop?.min_order_amount && partnerSubtotal < shop.min_order_amount) {
-      toast.error(`Minimum order is R${shop.min_order_amount.toFixed(2)} for ${shopName}`);
+      toast.error(`Minimum order is ${formatUSD(shop.min_order_amount.toFixed(2))} for ${shopName}`);
       return;
     }
     if (!isPickup && !address.trim()) { toast.error('Please enter your delivery address'); return; }
@@ -352,7 +353,7 @@ export default function Checkout() {
       clearCart();
       toast.success(
         result.wallet_applied > 0
-          ? `Order placed — wallet applied R${result.wallet_applied.toFixed(2)}`
+          ? `Order placed — wallet applied ${formatUSD(result.wallet_applied.toFixed(2))}`
           : 'Order placed!'
       );
       navigate(`/order/${order.id}/confirmed`);
@@ -427,7 +428,7 @@ export default function Checkout() {
           <span className="text-xl">💙</span>
           <div className="flex-1">
             <p className="font-semibold text-sm text-blue-800">
-              Wallet balance available: R{walletBalance.toFixed(2)}
+              Wallet balance available: {formatUSD(walletBalance)}
             </p>
             <p className="text-xs text-blue-700 mt-0.5">
               Applied automatically at checkout (amount confirmed by server)
@@ -486,7 +487,7 @@ export default function Checkout() {
                   <div className="mt-1.5">
                     <p className="text-xs text-primary font-medium">
                       ✅ {distanceKm.toFixed(1)} km from {shopName}
-                  {rawDeliveryFee != null && <span className="ml-1">— delivery R{rawDeliveryFee.toFixed(2)}</span>}
+                  {rawDeliveryFee != null && <span className="ml-1">— delivery {formatUSD(rawDeliveryFee)}</span>}
                     </p>
                     {surge?.active && (
                       <p className="text-xs text-orange-600 font-medium mt-0.5">
@@ -555,7 +556,7 @@ export default function Checkout() {
                 {item.quantity}× {item.name}
                 {item.variant_name ? ` (${item.variant_name})` : ''}
               </span>
-              <span className="font-medium">R{(item.price * item.quantity).toFixed(2)}</span>
+              <span className="font-medium">{formatUSD((item.price * item.quantity))}</span>
             </div>
           ))}
         </div>
@@ -583,7 +584,7 @@ export default function Checkout() {
                     : 'bg-muted/50 border-transparent text-foreground'
                 }`}
               >
-                {t === 0 ? 'No tip' : `R${t}`}
+                {t === 0 ? 'No tip' : `${formatUSD(t)}`}
               </button>
             ))}
           </div>
@@ -607,8 +608,8 @@ export default function Checkout() {
                   {appliedAdminPromo ? appliedAdminPromo.title : appliedPromo.title}
                 </p>
                 {isFreeDelivery && <p className="text-xs text-blue-700">🚚 Free delivery</p>}
-                {adminPromoResult.discountAmount > 0 && <p className="text-xs text-blue-700">−R{adminPromoResult.discountAmount.toFixed(2)} off</p>}
-                {shopCouponDiscount > 0 && <p className="text-xs text-green-700">−R{shopCouponDiscount.toFixed(2)} off</p>}
+                {adminPromoResult.discountAmount > 0 && <p className="text-xs text-blue-700">−{formatUSD(adminPromoResult.discountAmount)} off</p>}
+                {shopCouponDiscount > 0 && <p className="text-xs text-green-700">−{formatUSD(shopCouponDiscount)} off</p>}
               </div>
             </div>
             <button onClick={() => { setAppliedPromo(null); setAppliedAdminPromo(null); setCouponInput(''); }}>
@@ -664,7 +665,7 @@ export default function Checkout() {
               className="rounded"
             />
             <span className="text-sm font-medium text-blue-900">
-              Use wallet balance (R{walletBalance.toFixed(2)})
+              Use wallet balance ({formatUSD(walletBalance)})
             </span>
           </label>
         )}
@@ -681,7 +682,7 @@ export default function Checkout() {
           {items.map(item => (
             <div key={item.menu_item_id} className="flex justify-between text-sm">
               <span className="text-muted-foreground">{item.quantity}× {item.name}</span>
-              <span className="font-medium">R{(item.price * item.quantity * 1.05).toFixed(2)}</span>
+              <span className="font-medium">{formatUSD((item.price * item.quantity * 1.05))}</span>
             </div>
           ))}
           <Separator className="my-2" />
@@ -689,7 +690,7 @@ export default function Checkout() {
             <>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Subtotal (incl. 5% fee)</span>
-                <span>R{pricing.customerSubtotal.toFixed(2)}</span>
+                <span>{formatUSD(pricing.customerSubtotal)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">
@@ -697,24 +698,24 @@ export default function Checkout() {
                   {isFreeDelivery && !isPickup && <span className="text-blue-600 font-medium"> — Free</span>}
                 </span>
                 <span className={isPickup || isFreeDelivery ? 'text-green-600 font-medium' : ''}>
-                  {isPickup ? 'FREE' : rawDeliveryFee != null ? `R${rawDeliveryFee.toFixed(2)}` : '—'}
+                  {isPickup ? 'FREE' : rawDeliveryFee != null ? `${formatUSD(rawDeliveryFee.toFixed(2))}` : '—'}
                 </span>
               </div>
               {totalDiscount > 0 && (
                 <div className="flex justify-between text-sm text-green-600 font-medium">
-                  <span>Coupon discount</span><span>−R{totalDiscount.toFixed(2)}</span>
+                  <span>Coupon discount</span><span>−{formatUSD(totalDiscount)}</span>
                 </div>
               )}
               {tipAmount > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Driver tip</span>
-                  <span>R{tipAmount.toFixed(2)}</span>
+                  <span>{formatUSD(tipAmount)}</span>
                 </div>
               )}
               {walletApplied > 0 && (
                 <div className="flex justify-between text-sm text-blue-600 font-medium">
                   <span>Wallet applied (preview)</span>
-                  <span>−R{walletApplied.toFixed(2)}</span>
+                  <span>−{formatUSD(walletApplied)}</span>
                 </div>
               )}
               {estimatedArrivalMins != null && !isPickup && (
@@ -725,11 +726,11 @@ export default function Checkout() {
               )}
               <Separator className="my-2" />
               <div className="flex justify-between font-bold text-lg">
-                <span>You pay now</span><span>R{finalTotal.toFixed(2)}</span>
+                <span>You pay now</span><span>{formatUSD(finalTotal)}</span>
               </div>
               {walletApplied > 0 && (
                 <p className="text-xs text-blue-600 text-right -mt-1">
-                  R{walletApplied.toFixed(2)} from your wallet · R{Math.max(0, walletBalance - walletApplied).toFixed(2)} remaining
+                  {formatUSD(walletApplied)} from your wallet · {formatUSD(Math.max(0, walletBalance - walletApplied))} remaining
                 </p>
               )}
             </>
@@ -749,7 +750,7 @@ export default function Checkout() {
           : calcingDist
             ? 'Finding your location…'
             : finalTotal != null
-              ? `Place Order — R${finalTotal.toFixed(2)}`
+              ? `Place Order — ${formatUSD(finalTotal.toFixed(2))}`
               : 'Enter address to continue'
         }
       </Button>

@@ -78,7 +78,7 @@ export function notifyOrderPlaced(order) {
   createNotification({
     recipient_email: order.customer_email,
     title: '✅ Order Placed!',
-    body: `Your order from ${name} has been received. Total: R${order.total?.toFixed(2)}`,
+    body: `Your order from ${name} has been received. Total: ${order.total?.toFixed(2)}`,
     type: 'order_placed',
     link: `/order/${order.id}`,
   });
@@ -86,7 +86,7 @@ export function notifyOrderPlaced(order) {
     createNotification({
       recipient_email: order.partner_email,
       title: '🛎️ New Order!',
-      body: `New order from ${order.customer_name || 'a customer'} — R${order.partner_payout?.toFixed(2)} • ${order.payment_method?.replace(/_/g, ' ')}`,
+      body: `New order from ${order.customer_name || 'a customer'} — ${order.partner_payout?.toFixed(2)} • ${order.payment_method?.replace(/_/g, ' ')}`,
       type: 'new_order',
       link: '/orders',
     });
@@ -164,7 +164,7 @@ export function notifyOrderStatusChanged(order, newStatus) {
     createNotification({
       recipient_email: '__drivers__',
       title: '🚀 New Job Available!',
-      body: `Order from ${name} is ready for pickup — earn R${order.driver_earning?.toFixed(2)}`,
+      body: `Order from ${name} is ready for pickup — earn ${order.driver_earning?.toFixed(2)}`,
       type: 'job_available',
       link: '/',
     });
@@ -188,7 +188,7 @@ export function notifyOrderStatusChanged(order, newStatus) {
       title: titles[status] || 'Order Update',
       body:
         status === ORDER_STATUS.DELIVERED || status === ORDER_STATUS.COMPLETED
-          ? `Order for ${order.customer_name} delivered. Payout: R${order.partner_payout?.toFixed(2)}`
+          ? `Order for ${order.customer_name} delivered. Payout: ${order.partner_payout?.toFixed(2)}`
           : `${order.driver_name || 'Driver'} is handling the order for ${order.customer_name}.`,
       type: `order_${status}`,
       link: '/orders',
@@ -232,7 +232,7 @@ export function notifyReplacementResolved(order, itemName, actionLabel) {
 export function notifyWalletCredited(email, amount, reason) {
   createNotification({
     recipient_email: email,
-    title: `💰 Wallet Credited +R${amount.toFixed(2)}`,
+    title: `💰 Wallet Credited +${amount.toFixed(2)}`,
     body: reason,
     type: 'wallet_credited',
     link: '/wallet',

@@ -30,11 +30,12 @@ function mapPgUser(row) {
   if (!row) return null;
   return {
     id: row.id,
-    email: row.email,
+    email: String(row.email || ''),
     full_name: row.full_name,
     role: row.role,
     staff_role: row.staff_role || undefined,
     phone: row.phone || '',
+    is_active: row.is_active !== false,
     created_date: row.created_at,
   };
 }
@@ -184,10 +185,10 @@ export async function updateUser(email, data) {
 export async function listUsersSafe() {
   if (isPostgresEnabled()) {
     const r = await query(
-      `SELECT id, email, full_name, role, staff_role, phone, created_at
+      `SELECT id, email, full_name, role, staff_role, phone, is_active, created_at
        FROM users ORDER BY created_at`
     );
-    return r.rows.map(mapPgUser);
+    return r.rows.map(mapPgUser).filter(Boolean);
   }
   return getUsersStoreJson().map(sanitizeUser);
 }

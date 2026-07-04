@@ -13,8 +13,9 @@
  *  referral            — discount for referring a new user
  */
 
-import { getCollection, saveCollection } from '../../db/localDb.js';
-import { creditWallet, debitWallet, getBalance, PLATFORM_EMAIL } from '../payments/finance.js';
+import { getCollection, saveCollection, localDb } from '../../db/localDb.js';
+import { isPostgresEnabled } from '../../db/pg.js';
+import { creditWallet, debitWallet, PLATFORM_EMAIL } from '../payments/finance.js';
 
 const KEY = 'AdminPromotion';
 
@@ -24,11 +25,21 @@ function genId() {
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 
-export function getAdminPromotions() {
+export async function getAdminPromotions() {
+  if (isPostgresEnabled()) {
+    return localDb.entities.AdminPromotion.list('-created_date', 100);
+  }
   return getCollection(KEY).sort((a,b) => new Date(b.created_date) - new Date(a.created_date));
 }
 
-export function createAdminPromotion(data) {
+export async function createAdminPromotion(data) {
+  if (isPostgresEnabled()) {
+    return localDb.entities.AdminPromotion.create({
+      ...data,
+      times_used: 0,
+      is_active: data.is_active !== false,
+    });
+  }
   const promos = getCollection(KEY);
   const promo = {
     ...data,
@@ -44,7 +55,10 @@ export function createAdminPromotion(data) {
   return promo;
 }
 
-export function updateAdminPromotion(id, data) {
+export async function updateAdminPromotion(id, data) {
+  if (isPostgresEnabled()) {
+    return localDb.entities.AdminPromotion.update(id, data);
+  }
   const promos = getCollection(KEY);
   const idx = promos.findIndex(p => p.id === id);
   if (idx < 0) throw new Error('Promo not found');
@@ -53,7 +67,10 @@ export function updateAdminPromotion(id, data) {
   return promos[idx];
 }
 
-export function deleteAdminPromotion(id) {
+export async function deleteAdminPromotion(id) {
+  if (isPostgresEnabled()) {
+    return localDb.entities.AdminPromotion.delete(id);
+  }
   saveCollection(KEY, getCollection(KEY).filter(p => p.id !== id));
 }
 
@@ -79,7 +96,7 @@ export function validateAdminCoupon(code, customerEmail, orderSubtotal) {
   if (promo.applicable_days?.length > 0 && !promo.applicable_days.includes(dayName))
     return { valid: false, error: `This coupon is only valid on: ${promo.applicable_days.join(', ')}.` };
   if (promo.min_order_amount && orderSubtotal < promo.min_order_amount)
-    return { valid: false, error: `Minimum order R${promo.min_order_amount.toFixed(2)} required.` };
+    return { valid: false, error: `Minimum order ${promo.min_order_amount.toFixed(2)} required.` };
   if (promo.max_uses && promo.times_used >= promo.max_uses)
     return { valid: false, error: 'This coupon has reached its usage limit.' };
   if (promo.new_users_only) {
@@ -96,7 +113,7 @@ export function validateAdminCoupon(code, customerEmail, orderSubtotal) {
  * Called at order delivery settlement.
  * If a platform promo was applied, the platform wallet funds it.
  */
-export function applyPlatformPromoSettlement(order) {
+export async function applyPlatformPromoSettlement(order) {
   if (!order.admin_promo_id) return;
 
   const promos = getCollection(KEY);
@@ -106,16 +123,16 @@ export function applyPlatformPromoSettlement(order) {
   const ref = `Platform promo "${promo.title}" - Order #${order.id?.slice(-6)}`;
 
   if (promo.promo_type === 'free_delivery') {
-    // Platform pays the driver's delivery earning
-    debitWallet(PLATFORM_EMAIL, 'platform', order.driver_earning || 0,
+    await debitWallet(PLATFORM_EMAIL, 'platform', order.driver_earning || 0,
       `Free delivery funded - Order #${order.id?.slice(-6)}`);
-    creditWallet(order.driver_email, 'driver', order.driver_earning || 0,
-      `Delivery earning (platform-funded free delivery) - Order #${order.id?.slice(-6)}`);
+    if (order.driver_email) {
+      await creditWallet(order.driver_email, 'driver', order.driver_earning || 0,
+        `Delivery earning (platform-funded free delivery) - Order #${order.id?.slice(-6)}`);
+    }
   } else if (['platform_discount','new_user_discount','flash_sale','loyalty_reward','referral'].includes(promo.promo_type)) {
-    // Platform funds the discount amount
     const discount = order.admin_discount_amount || 0;
     if (discount > 0) {
-      debitWallet(PLATFORM_EMAIL, 'platform', discount, ref);
+      await debitWallet(PLATFORM_EMAIL, 'platform', discount, ref);
     }
   }
 

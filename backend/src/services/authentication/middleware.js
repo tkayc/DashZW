@@ -80,7 +80,12 @@ export async function optionalAuth(req, res, next) {
 export function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ message: 'Not authenticated' });
-    if (!roles.includes(req.user.role)) {
+    const role = req.user.role;
+    const allowed = new Set(roles);
+    if (allowed.has('admin')) {
+      allowed.add('super_admin');
+    }
+    if (!allowed.has(role)) {
       return res.status(403).json({ message: 'Forbidden' });
     }
     next();

@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { Link, useLocation } from 'react-router-dom';
 import { ShoppingBag } from 'lucide-react';
 import { useCart } from '@/lib/CartContext';
@@ -36,7 +37,7 @@ export default function FloatingCartBar() {
             </div>
           </div>
           <div className="text-right shrink-0">
-            <p className="text-sm font-bold">R{subtotal.toFixed(2)}</p>
+            <p className="text-sm font-bold">{formatUSD(subtotal)}</p>
             <p className="text-[10px] text-primary-foreground/80">View cart</p>
           </div>
         </Link>

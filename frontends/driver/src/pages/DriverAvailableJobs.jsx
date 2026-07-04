@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { MapPin, Clock, DollarSign, Store, Bike, AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import { formatUSD } from '@/lib/formatCurrency';
 import { isDriverBlocked, canDriverAcceptOrder, calcServiceFee, useBalance } from '@/api';
 import { notifyOrderStatusChanged } from '@/api';
 import {
@@ -87,7 +88,7 @@ export default function DriverAvailableJobs() {
   const [accepting, setAccepting] = useState(null);
   const [rejectedIds, setRejectedIds] = useState(() => new Set());
 
-  const { data: available = [], isLoading } = useQuery({
+  const { data: available = [], isLoading, isError, error, refetch } = useQuery({
     queryKey: ['driver-available'],
     queryFn: () => base44.entities.Order.filter({ status: ORDER_STATUS.READY_FOR_PICKUP }, '-created_date', 50),
     refetchInterval: 3000,
@@ -131,7 +132,7 @@ export default function DriverAvailableJobs() {
     if (!canAccept) {
       const _serviceFee = await calcServiceFee(order.delivery_fee || 0);
       const debt = parseFloat(((order.customer_subtotal || 0) + _serviceFee).toFixed(2));
-      toast.error(`Wallet too low. This COD order would add R${debt.toFixed(2)} debt (limit -$5). Top up first.`);
+      toast.error(`Wallet too low. This COD order would add ${formatUSD(debt)} debt (limit -$5). Top up first.`);
       return;
     }
     // Multi-order check
@@ -175,6 +176,16 @@ export default function DriverAvailableJobs() {
   if (isLoading) return (
     <div className="space-y-3">{[1,2,3].map(i=><div key={i} className="h-40 bg-muted rounded-2xl animate-pulse"/>)}</div>
   );
+
+  if (isError) {
+    return (
+      <div className="bg-card rounded-2xl border border-destructive/30 p-8 text-center space-y-3">
+        <p className="font-bold text-foreground">Could not load jobs</p>
+        <p className="text-sm text-muted-foreground">{error?.message || 'Check that the API is running'}</p>
+        <button type="button" onClick={() => refetch()} className="text-sm font-semibold text-primary">Try again</button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -296,12 +307,12 @@ export default function DriverAvailableJobs() {
                     <div>
                       <p className="font-bold text-sm text-foreground">{order.shop_name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {format(new Date(order.created_date), 'HH:mm')} · {PAYMENT_LABELS[order.payment_method]}
+                        {order.created_date ? format(new Date(order.created_date), 'HH:mm') : '—'} · {PAYMENT_LABELS[order.payment_method] || order.payment_method}
                       </p>
                     </div>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className="font-bold text-foreground">${order.total?.toFixed(2)}</p>
+                    <p className="font-bold text-foreground">{formatUSD(order.total)}</p>
                     <p className="text-xs text-muted-foreground">{order.items?.length} item(s)</p>
                   </div>
                 </div>

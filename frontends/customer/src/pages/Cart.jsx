@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Minus, Plus, Trash2, ShoppingBag, Tag, Wallet, Bookmark, Store,
@@ -133,7 +134,7 @@ export default function Cart() {
                   </p>
                 )}
                 <p className="font-bold text-sm text-primary mt-1">
-                  R{(item.price * item.quantity).toFixed(2)}
+                  {formatUSD((item.price * item.quantity))}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -202,7 +203,7 @@ export default function Cart() {
           <Wallet className="w-4 h-4 text-primary" />
           <div className="flex-1">
             <p className="text-sm font-medium">Use wallet balance</p>
-            <p className="text-xs text-muted-foreground">R{walletBalance.toFixed(2)} available</p>
+            <p className="text-xs text-muted-foreground">{formatUSD(walletBalance)} available</p>
           </div>
         </label>
       )}
@@ -220,7 +221,7 @@ export default function Cart() {
                 tipAmount === t ? 'border-primary bg-primary/10 text-primary' : 'border-border'
               }`}
             >
-              {t === 0 ? 'None' : `R${t}`}
+              {t === 0 ? 'None' : `${formatUSD(t)}`}
             </button>
           ))}
         </div>
@@ -250,18 +251,18 @@ export default function Cart() {
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">Subtotal ({itemCount} items)</span>
-            <span className="font-medium">R{subtotal.toFixed(2)}</span>
+            <span className="font-medium">{formatUSD(subtotal)}</span>
           </div>
           {tipAmount > 0 && (
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Driver tip</span>
-              <span className="font-medium">R{tipAmount.toFixed(2)}</span>
+              <span className="font-medium">{formatUSD(tipAmount)}</span>
             </div>
           )}
           {walletPreview > 0 && (
             <div className="flex justify-between text-sm text-green-700">
               <span>Wallet (preview)</span>
-              <span>−R{walletPreview.toFixed(2)}</span>
+              <span>−{formatUSD(walletPreview)}</span>
             </div>
           )}
           <div className="flex justify-between text-sm">
@@ -272,7 +273,7 @@ export default function Cart() {
           <div className="flex justify-between">
             <span className="font-bold">Est. subtotal</span>
             <span className="font-bold text-lg">
-              R{Math.max(0, subtotal + tipAmount - walletPreview).toFixed(2)}
+              {formatUSD(Math.max(0, subtotal + tipAmount - walletPreview))}
             </span>
           </div>
         </div>

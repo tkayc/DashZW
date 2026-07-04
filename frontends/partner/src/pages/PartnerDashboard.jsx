@@ -1,3 +1,4 @@
+import { formatUSD } from '@/lib/formatCurrency';
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useRealtimeQuery as useQuery } from '@/api';
@@ -50,7 +51,7 @@ export default function PartnerDashboard({ shop }) {
 
   const stats = [
     { label: 'Active Orders', value: active.length, icon: Clock, color: 'text-orange-500 bg-orange-50' },
-    { label: "Today's Revenue", value: `R${todayRevenue.toFixed(2)}`, icon: TrendingUp, color: 'text-green-600 bg-green-50' },
+    { label: "Today's Revenue", value: `${formatUSD(todayRevenue.toFixed(2))}`, icon: TrendingUp, color: 'text-green-600 bg-green-50' },
     { label: 'Total Orders', value: orders.length, icon: ClipboardList, color: 'text-blue-500 bg-blue-50' },
     { label: 'Menu Items', value: menuItems.length, icon: UtensilsCrossed, color: 'text-purple-500 bg-purple-50' },
   ];

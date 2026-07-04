@@ -1,3 +1,4 @@
+import { formatUSD } from '@/lib/formatCurrency';
 import React, { useMemo } from 'react';
 import { useRealtimeQuery as useQuery } from '@/api';
 import { base44 } from '@/api';
@@ -81,8 +82,8 @@ export default function PartnerAnalytics({ shop }) {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: 'Revenue', value: `R${stats.revenue.toFixed(2)}`, icon: DollarSign },
-          { label: 'Sales (GMV)', value: `R${stats.sales.toFixed(2)}`, icon: ShoppingBag },
+          { label: 'Revenue', value: `${formatUSD(stats.revenue.toFixed(2))}`, icon: DollarSign },
+          { label: 'Sales (GMV)', value: `${formatUSD(stats.sales.toFixed(2))}`, icon: ShoppingBag },
           { label: 'Orders', value: stats.orderCount, icon: BarChart3 },
           { label: 'Customers', value: stats.customers, icon: Users },
         ].map((s) => (

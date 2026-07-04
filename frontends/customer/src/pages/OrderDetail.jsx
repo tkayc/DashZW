@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { base44 } from '@/api';
 import { useRealtimeQuery as useQuery } from '@/api';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -268,7 +269,7 @@ export default function OrderDetail() {
                     className="w-full text-left px-3 py-2 rounded-xl bg-white border border-orange-200 hover:bg-orange-100"
                   >
                     <p className="text-sm font-semibold text-foreground">{opt.name}</p>
-                    <p className="text-xs text-muted-foreground">Swap item · R{(opt.price || 0).toFixed(2)}</p>
+                    <p className="text-xs text-muted-foreground">Swap item · {formatUSD((opt.price || 0))}</p>
                   </button>
                 ))}
                 <button
@@ -460,7 +461,7 @@ export default function OrderDetail() {
             <span className="text-muted-foreground">Delivery
               {order.distance_km ? ` (${order.distance_km.toFixed(1)} km)` : ''}
             </span>
-            <span>{order.delivery_fee ? `R${order.delivery_fee.toFixed(2)}` : 'Free'}</span>
+            <span>{order.delivery_fee ? `${formatUSD(order.delivery_fee.toFixed(2))}` : 'Free'}</span>
           </div>
           {order.discount_amount > 0 && (
             <div className="flex justify-between text-sm text-green-600">
@@ -541,29 +542,29 @@ export default function OrderDetail() {
             <div className="space-y-1 text-xs text-muted-foreground">
               <div className="flex justify-between">
                 <span>Subtotal</span>
-                <span>R{(order.customer_subtotal || order.total)?.toFixed(2)}</span>
+                <span>{formatUSD(order.customer_subtotal || order.total)}</span>
               </div>
               {order.delivery_fee > 0 && (
                 <div className="flex justify-between">
                   <span>Delivery</span>
-                  <span>R{order.delivery_fee.toFixed(2)}</span>
+                  <span>{formatUSD(order.delivery_fee)}</span>
                 </div>
               )}
               {order.driver_tip > 0 && (
                 <div className="flex justify-between">
                   <span>Driver tip</span>
-                  <span>R{order.driver_tip.toFixed(2)}</span>
+                  <span>{formatUSD(order.driver_tip)}</span>
                 </div>
               )}
               {order.wallet_applied > 0 && (
                 <div className="flex justify-between text-blue-600">
                   <span>Wallet</span>
-                  <span>−R{order.wallet_applied.toFixed(2)}</span>
+                  <span>−{formatUSD(order.wallet_applied)}</span>
                 </div>
               )}
               <div className="flex justify-between font-bold text-foreground pt-1 border-t border-border mt-1">
                 <span>Total paid</span>
-                <span>R{order.total?.toFixed(2)}</span>
+                <span>{formatUSD(order.total)}</span>
               </div>
               <p className="text-[10px] pt-1 capitalize">
                 Paid via {(order.payment_method || '').replace(/_/g, ' ')} · #{order.id?.slice(-8)}
@@ -627,12 +628,12 @@ export default function OrderDetail() {
                   type="button"
                   onClick={() =>
                     toast.message('Tip placeholder', {
-                      description: `R${t} tip will be sent when payments are connected.`,
+                      description: `${formatUSD(t)} tip will be sent when payments are connected.`,
                     })
                   }
                   className="flex-1 py-2 rounded-xl bg-muted text-sm font-semibold"
                 >
-                  R{t}
+                  {formatUSD(t)}
                 </button>
               ))}
             </div>

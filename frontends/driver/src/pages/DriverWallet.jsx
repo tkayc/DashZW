@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { useAuth } from '@/lib/AuthContext';
 import { useRealtimeQuery as useQuery } from '@/api';
 import { base44 } from '@/api';
@@ -53,7 +54,7 @@ export default function DriverWallet() {
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Available balance</p>
-            <p className="text-3xl font-bold text-foreground">R{(balance || 0).toFixed(2)}</p>
+            <p className="text-3xl font-bold text-foreground">{formatUSD((balance || 0))}</p>
           </div>
         </div>
         <Button
@@ -70,23 +71,23 @@ export default function DriverWallet() {
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-muted-foreground">Delivery earnings</p>
-          <p className="text-lg font-bold">R{earnings.toFixed(2)}</p>
+          <p className="text-lg font-bold">{formatUSD(earnings)}</p>
         </div>
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-muted-foreground">Tips</p>
-          <p className="text-lg font-bold text-green-700">R{tips.toFixed(2)}</p>
+          <p className="text-lg font-bold text-green-700">{formatUSD(tips)}</p>
         </div>
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-muted-foreground flex items-center gap-1">
             <Gift className="w-3 h-3" /> Bonuses
           </p>
-          <p className="text-lg font-bold">R{bonuses.toFixed(2)}</p>
+          <p className="text-lg font-bold">{formatUSD(bonuses)}</p>
         </div>
         <div className="bg-card rounded-2xl border border-border p-4">
           <p className="text-xs text-muted-foreground flex items-center gap-1">
             <Zap className="w-3 h-3" /> Incentives
           </p>
-          <p className="text-lg font-bold">R{incentives.toFixed(2)}</p>
+          <p className="text-lg font-bold">{formatUSD(incentives)}</p>
         </div>
       </div>
 
@@ -135,7 +136,7 @@ export default function DriverWallet() {
                   </p>
                 </div>
                 <span className={`font-bold shrink-0 ${tx.amount >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                  {tx.amount >= 0 ? '+' : ''}R{Number(tx.amount).toFixed(2)}
+                  {tx.amount >= 0 ? '+' : ''}{formatUSD(Number(tx.amount))}
                 </span>
               </div>
             ))}

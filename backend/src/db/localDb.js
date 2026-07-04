@@ -1,8 +1,10 @@
 /**
- * JSON entity store. Domain: Merchant (=Shop), Product (=MenuItem), Branch, MerchantStaff.
- * TODO(postgresql): Replace makeEntity with SQL repositories for these collections.
+ * Entity store — PostgreSQL when DATABASE_URL is set, otherwise JSON files.
+ * Entities are resolved per-call so dotenv can load before first use.
  */
 import { getCollection, saveCollection, subscribeToDbChanges } from './store.js';
+import { isPostgresEnabled } from './pg.js';
+import { makePgEntity, hasPgEntity } from './pgEntities.js';
 
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -21,20 +23,25 @@ function applySort(items, sortKey) {
   });
 }
 
-function makeEntity(collectionName) {
+function makeJsonEntity(collectionName) {
+  const fileName =
+    collectionName === 'Merchant' ? 'Shop'
+      : collectionName === 'Product' ? 'MenuItem'
+        : collectionName;
+
   return {
     list: async (sortKey = '-created_date', limit = 50) => {
-      return applySort(getCollection(collectionName), sortKey).slice(0, limit);
+      return applySort(getCollection(fileName), sortKey).slice(0, limit);
     },
     filter: async (filters = {}, sortKey = '-created_date', limit = 100) => {
-      let items = getCollection(collectionName);
+      let items = getCollection(fileName);
       items = items.filter((item) =>
         Object.entries(filters).every(([k, v]) => item[k] === v)
       );
       return applySort(items, sortKey).slice(0, limit);
     },
     create: async (data) => {
-      const items = getCollection(collectionName);
+      const items = getCollection(fileName);
       const newItem = {
         ...data,
         id: generateId(),
@@ -42,21 +49,21 @@ function makeEntity(collectionName) {
         updated_date: new Date().toISOString(),
       };
       items.push(newItem);
-      saveCollection(collectionName, items);
+      saveCollection(fileName, items);
       return newItem;
     },
     update: async (id, data) => {
-      const items = getCollection(collectionName);
+      const items = getCollection(fileName);
       const idx = items.findIndex((i) => i.id === id);
-      if (idx === -1) throw new Error(`Item ${id} not found in ${collectionName}`);
+      if (idx === -1) throw new Error(`Item ${id} not found in ${fileName}`);
       items[idx] = { ...items[idx], ...data, updated_date: new Date().toISOString() };
-      saveCollection(collectionName, items);
+      saveCollection(fileName, items);
       return items[idx];
     },
     delete: async (id) => {
-      const items = getCollection(collectionName);
+      const items = getCollection(fileName);
       saveCollection(
-        collectionName,
+        fileName,
         items.filter((i) => i.id !== id)
       );
       return { id };
@@ -64,36 +71,33 @@ function makeEntity(collectionName) {
   };
 }
 
+function resolveEntity(collectionName) {
+  if (isPostgresEnabled() && hasPgEntity(collectionName)) {
+    return makePgEntity(collectionName);
+  }
+  return makeJsonEntity(collectionName);
+}
+
+/** Lazy proxy so each method uses current PG/JSON mode */
+function lazyEntity(collectionName) {
+  return {
+    list: (...args) => resolveEntity(collectionName).list(...args),
+    filter: (...args) => resolveEntity(collectionName).filter(...args),
+    create: (...args) => resolveEntity(collectionName).create(...args),
+    update: (...args) => resolveEntity(collectionName).update(...args),
+    delete: (...args) => resolveEntity(collectionName).delete(...args),
+  };
+}
+
 export { subscribeToDbChanges, getCollection, saveCollection };
 
-// Shop / MenuItem collections persist merchant / product data (legacy names).
-// Merchant / Product aliases expose the same collections under domain names.
-const shopEntity = makeEntity('Shop');
-const menuItemEntity = makeEntity('MenuItem');
+const NAMES = [
+  'Shop', 'MenuItem', 'Merchant', 'Product', 'Branch', 'MerchantStaff',
+  'Order', 'Review', 'Promotion', 'Wallet', 'Transaction', 'DriverProfile',
+  'Notification', 'AdminPromotion', 'Settlement', 'Withdrawal', 'Referral',
+  'LoyaltyPoints', 'DriverIncident',
+];
 
 export const localDb = {
-  entities: {
-    // Legacy collection names (still used by existing clients)
-    Shop: shopEntity,
-    MenuItem: menuItemEntity,
-    // Domain aliases (same storage)
-    Merchant: shopEntity,
-    Product: menuItemEntity,
-    // Multi-branch + staff (new collections)
-    Branch: makeEntity('Branch'),
-    MerchantStaff: makeEntity('MerchantStaff'),
-    Order: makeEntity('Order'),
-    Review: makeEntity('Review'),
-    Promotion: makeEntity('Promotion'),
-    Wallet: makeEntity('Wallet'),
-    Transaction: makeEntity('Transaction'),
-    DriverProfile: makeEntity('DriverProfile'),
-    Notification: makeEntity('Notification'),
-    AdminPromotion: makeEntity('AdminPromotion'),
-    Settlement: makeEntity('Settlement'),
-    Withdrawal: makeEntity('Withdrawal'),
-    Referral: makeEntity('Referral'),
-    LoyaltyPoints: makeEntity('LoyaltyPoints'),
-    DriverIncident: makeEntity('DriverIncident'),
-  },
+  entities: Object.fromEntries(NAMES.map((n) => [n, lazyEntity(n)])),
 };

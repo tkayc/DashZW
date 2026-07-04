@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { Link } from 'react-router-dom';
 import { CalendarClock } from 'lucide-react';
 import PageHeader from '@/components/layout/PageHeader';
@@ -70,7 +71,7 @@ export default function ScheduledOrders() {
                   {format(new Date(o.scheduled_time), 'EEE d MMM · HH:mm')}
                 </p>
                 <p className="text-[10px] text-muted-foreground mt-0.5 capitalize">
-                  {(o.status || '').replace(/_/g, ' ')} · R{o.total?.toFixed(2)}
+                  {(o.status || '').replace(/_/g, ' ')} · {formatUSD(o.total)}
                 </p>
               </Link>
             ))}
