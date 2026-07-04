@@ -1,0 +1,25 @@
+{
+  "name": "dashzw-monorepo",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "workspaces": [
+    "backend",
+    "frontends/customer",
+    "frontends/partner",
+    "frontends/driver",
+    "frontends/admin"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,cust,part,drv,admin -c blue,green,yellow,magenta,cyan \"npm run dev -w @dashzw/backend\" \"npm run dev -w @dashzw/customer\" \"npm run dev -w @dashzw/partner\" \"npm run dev -w @dashzw/driver\" \"npm run dev -w @dashzw/admin\"",
+    "dev:api": "npm run dev -w @dashzw/backend",
+    "dev:customer": "npm run dev -w @dashzw/customer",
+    "dev:partner": "npm run dev -w @dashzw/partner",
+    "dev:driver": "npm run dev -w @dashzw/driver",
+    "dev:admin": "npm run dev -w @dashzw/admin",
+    "build": "npm run build -w @dashzw/customer -w @dashzw/partner -w @dashzw/driver -w @dashzw/admin"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

@@ -1,0 +1,3 @@
+data/*.json
+data/chats/
+!data/.gitkeep
