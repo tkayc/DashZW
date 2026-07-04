@@ -32,7 +32,22 @@ const ADMIN_ONLY = new Set([
   'surgePricing.setSurgeConfig',
 ]);
 
+/** Direct wallet mutations — never callable by customer role */
+const CUSTOMER_BLOCKED = new Set([
+  'finance.creditWallet',
+  'finance.debitWallet',
+  'finance.topUpDriver',
+  'finance.refundToCustomerWallet',
+  'settlements.driverWithdraw',
+  'settlements.driverTopUp',
+  'settlements.settlePartnerWallet',
+]);
+
 const router = Router();
+
+function isCustomer(user) {
+  return user?.role === 'customer';
+}
 
 router.post('/invoke', authMiddleware, async (req, res) => {
   try {
@@ -45,6 +60,48 @@ router.post('/invoke', authMiddleware, async (req, res) => {
     if (ADMIN_ONLY.has(key) && req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Forbidden' });
     }
+    if (isCustomer(req.user) && CUSTOMER_BLOCKED.has(key)) {
+      return res.status(403).json({
+        message: 'Customers cannot modify wallet balances directly. Balance is applied automatically at checkout.',
+      });
+    }
+
+    // getBalance: customers may only query their own balance
+    if (key === 'finance.getBalance' && isCustomer(req.user)) {
+      const email = args[0];
+      if (email && email.toLowerCase() !== req.user.email.toLowerCase()) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+      args[0] = req.user.email;
+      args[1] = args[1] || 'customer';
+    }
+
+    // placeOrder / adjustment refund — inject authenticated user as first arg
+    if (key === 'orderEngine.placeOrder') {
+      const result = await orderEngine.placeOrder(req.user, args[0] || {});
+      return res.json({ result });
+    }
+    if (key === 'orderEngine.creditCustomerRefundForAdjustment') {
+      const result = orderEngine.creditCustomerRefundForAdjustment(
+        req.user,
+        args[0],
+        args[1],
+        args[2]
+      );
+      return res.json({ result });
+    }
+    if (key === 'orderEngine.cancelOwnOrder') {
+      const result = await orderEngine.cancelOwnOrder(req.user, args[0]);
+      return res.json({ result });
+    }
+
+    // Partner-only driver top-up / withdraw
+    if (key === 'finance.topUpDriver' || key === 'settlements.driverWithdraw') {
+      if (!['partner', 'admin', 'merchant_owner'].includes(req.user.role)) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+    }
+
     const result = await mod[method](...args);
     res.json({ result });
   } catch (e) {

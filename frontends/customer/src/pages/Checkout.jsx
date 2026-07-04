@@ -13,7 +13,7 @@ import ScheduledDelivery from '@/components/checkout/ScheduledDelivery';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
 import { calcDistanceFromShop, getBrowserLocation } from '@/api';
-import { calcDeliveryFee, buildPricing, calcServiceFee, getBalance, debitWallet } from '@/api';
+import { calcDeliveryFee, buildPricing, calcServiceFee, getBalance, placeOrder } from '@/api';
 import { calcSurgeMultiplier } from '@/api';
 import { getCollectionSync, getCollection } from '@/api';
 import { notifyOrderPlaced } from '@/api';
@@ -274,10 +274,6 @@ export default function Checkout() {
 
     if (user?.email) updateProfile(user.email, { phone, address: gpsCoords ? '' : address }).then(setProfile);
 
-    if (walletApplied > 0) {
-      await debitWallet(user.email, 'customer', walletApplied, `Wallet applied to order at ${shopName}`);
-    }
-
     setSubmitting(true);
     try {
       const serviceOnRaw = await calcServiceFee(rawDeliveryFee || 0);
@@ -289,11 +285,10 @@ export default function Checkout() {
         replacement_options: [],
       }));
 
-      const order = await base44.entities.Order.create({
-        customer_email:    user?.email || '',
+      // Server applies wallet from live balance — never send client wallet_applied as authority
+      const result = await placeOrder({
         customer_name:     user?.full_name || '',
         customer_phone:    phone,
-        // Merchant fields (shop_* kept for backward compatibility)
         merchant_id:       shopId,
         merchant_name:     shopName,
         merchant_category: shop?.category || '',
@@ -313,7 +308,6 @@ export default function Checkout() {
         service_fee:           pricing.serviceFee,
         discount_amount:       totalDiscount,
         admin_discount_amount: adminPromoResult.discountAmount,
-        total:                 finalTotal,
         partner_payout:        pricing.partnerPayout,
         platform_earning:      pricing.platformEarning,
         driver_earning: isPickup
@@ -338,28 +332,33 @@ export default function Checkout() {
         admin_promo_id:    appliedAdminPromo?.id || null,
         admin_promo_title: appliedAdminPromo?.title || null,
         is_free_delivery:  isFreeDelivery,
-        wallet_applied:    walletApplied,
         scheduled_time:    scheduledTime || null,
         is_scheduled:      !!scheduledTime,
-        delivery_code:     String(Math.floor(1000 + Math.random() * 9000)),
         pack_progress: {
           packed_units: 0,
           total_units: orderItems.reduce((sum, i) => sum + (i.quantity || 0), 0),
         },
         adjustment_requests: [],
         status: ORDER_STATUS_ON_CREATE,
+        total_before_wallet: totalBeforeWallet,
+        use_wallet: useWalletPayment,
       });
 
+      const order = result.order;
       if (appliedPromo) {
         await base44.entities.Promotion.update(appliedPromo.id, { times_used: (appliedPromo.times_used || 0) + 1 });
       }
       notifyOrderPlaced(order);
       clearCart();
-      toast.success('Order placed!');
+      toast.success(
+        result.wallet_applied > 0
+          ? `Order placed — wallet applied R${result.wallet_applied.toFixed(2)}`
+          : 'Order placed!'
+      );
       navigate(`/order/${order.id}/confirmed`);
     } catch (err) {
       console.error(err);
-      toast.error('Failed to place order. Please try again.');
+      toast.error(err.message || 'Failed to place order. Please try again.');
     } finally { setSubmitting(false); }
   };
 
@@ -427,8 +426,12 @@ export default function Checkout() {
         <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3 mb-4">
           <span className="text-xl">💙</span>
           <div className="flex-1">
-            <p className="font-semibold text-sm text-blue-800">R{walletBalance.toFixed(2)} wallet credit available</p>
-            <p className="text-xs text-blue-700 mt-0.5">This will be automatically applied to your order total</p>
+            <p className="font-semibold text-sm text-blue-800">
+              Wallet balance available: R{walletBalance.toFixed(2)}
+            </p>
+            <p className="text-xs text-blue-700 mt-0.5">
+              Applied automatically at checkout (amount confirmed by server)
+            </p>
           </div>
         </div>
       )}
@@ -710,7 +713,8 @@ export default function Checkout() {
               )}
               {walletApplied > 0 && (
                 <div className="flex justify-between text-sm text-blue-600 font-medium">
-                  <span>💙 Wallet credit applied</span><span>−R{walletApplied.toFixed(2)}</span>
+                  <span>Wallet applied (preview)</span>
+                  <span>−R{walletApplied.toFixed(2)}</span>
                 </div>
               )}
               {estimatedArrivalMins != null && !isPickup && (

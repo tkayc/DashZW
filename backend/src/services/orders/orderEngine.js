@@ -11,12 +11,13 @@
  * TODO(postgresql): Persist order status transitions in order_status_history.
  */
 
-import { getCollection, saveCollection } from '../../db/localDb.js';
+import { getCollection, saveCollection, localDb } from '../../db/localDb.js';
 import { getUsersFile } from '../../db/store.js';
-import { creditWallet } from '../payments/finance.js';
+import { creditWallet, debitWallet, getBalance } from '../payments/finance.js';
 import { createNotification } from '../notifications/notifications.js';
 import {
   ORDER_STATUS,
+  ORDER_STATUS_ON_CREATE,
   isAwaitingMerchantAcceptance,
   normalizeOrderStatus,
 } from '../../domain/orderStates.js';
@@ -194,4 +195,148 @@ export function applyReferral(newUserEmail, referralCode) {
       : `Welcome to DashZW! R10 has been added to your wallet.`,
     type: 'wallet_credited', link: '/profile',
   }));
+}
+
+/**
+ * Server-side checkout: create order and apply wallet balance atomically.
+ * Never trusts client-supplied wallet_applied amounts.
+ *
+ * @param {object} user — authenticated user (from JWT)
+ * @param {object} payload — order fields + total_before_wallet + use_wallet
+ */
+export async function placeOrder(user, payload = {}) {
+  if (!user?.email) throw new Error('Not authenticated');
+  if (user.role !== 'customer' && user.role !== 'admin') {
+    throw new Error('Only customers can place orders');
+  }
+
+  const totalBeforeWallet = parseFloat(payload.total_before_wallet);
+  if (!Number.isFinite(totalBeforeWallet) || totalBeforeWallet < 0) {
+    throw new Error('Invalid order total');
+  }
+
+  const useWallet = payload.use_wallet !== false;
+  const balance = getBalance(user.email, 'customer');
+  const walletApplied = useWallet
+    ? parseFloat(Math.min(balance, totalBeforeWallet).toFixed(2))
+    : 0;
+  const finalTotal = parseFloat(Math.max(0, totalBeforeWallet - walletApplied).toFixed(2));
+
+  if (walletApplied > 0) {
+    debitWallet(
+      user.email,
+      'customer',
+      walletApplied,
+      `Order payment wallet deduction — ${payload.shop_name || payload.merchant_name || 'order'}`,
+      'order_payment_wallet_deduction'
+    );
+  }
+
+  const {
+    total_before_wallet: _tbw,
+    use_wallet: _uw,
+    wallet_applied: _wa,
+    total: _clientTotal,
+    customer_email: _ce,
+    ...orderFields
+  } = payload;
+
+  const order = await localDb.entities.Order.create({
+    ...orderFields,
+    customer_email: user.email,
+    customer_name: orderFields.customer_name || user.full_name || '',
+    wallet_applied: walletApplied,
+    total: finalTotal,
+    status: orderFields.status || ORDER_STATUS_ON_CREATE,
+    delivery_code: orderFields.delivery_code || String(Math.floor(1000 + Math.random() * 9000)),
+  });
+
+  return {
+    order,
+    wallet_applied: walletApplied,
+    total: finalTotal,
+    wallet_balance_after: getBalance(user.email, 'customer'),
+  };
+}
+
+/**
+ * Customer cancels own order within policy window; refunds online payments to wallet.
+ */
+export async function cancelOwnOrder(user, orderId) {
+  if (!user?.email) throw new Error('Not authenticated');
+  const orders = getCollection('Order');
+  const idx = orders.findIndex((o) => o.id === orderId);
+  if (idx < 0) throw new Error('Order not found');
+  const order = orders[idx];
+  if (order.customer_email?.toLowerCase() !== user.email.toLowerCase()) {
+    throw new Error('Forbidden');
+  }
+  const status = normalizeOrderStatus(order.status);
+  if (status !== ORDER_STATUS.PENDING_ACCEPTANCE) {
+    throw new Error('Order can no longer be cancelled');
+  }
+  const age = (Date.now() - new Date(order.created_date).getTime()) / 1000;
+  if (age > 120) throw new Error('Cancel window expired');
+
+  orders[idx] = {
+    ...order,
+    status: ORDER_STATUS.CANCELLED,
+    cancel_reason: 'customer',
+    updated_date: new Date().toISOString(),
+  };
+  saveCollection('Order', orders);
+
+  let refunded = 0;
+  if (order.payment_method !== 'cash_on_delivery') {
+    // Refund amount paid (total) + wallet portion used
+    refunded = parseFloat(((order.total || 0) + (order.wallet_applied || 0)).toFixed(2));
+    if (refunded > 0) {
+      creditWallet(
+        user.email,
+        'customer',
+        refunded,
+        `Refund — cancelled order from ${order.shop_name || order.merchant_name}`,
+        'order_cancel_refund'
+      );
+    }
+  } else if (order.wallet_applied > 0) {
+    refunded = order.wallet_applied;
+    creditWallet(
+      user.email,
+      'customer',
+      refunded,
+      `Refund wallet portion — cancelled order from ${order.shop_name || order.merchant_name}`,
+      'order_cancel_refund'
+    );
+  }
+
+  createNotification({
+    recipient_email: user.email,
+    title: refunded > 0 ? `💰 Refund R${refunded.toFixed(2)}` : 'Order cancelled',
+    body: refunded > 0
+      ? `Your payment has been refunded to your DashZW wallet.`
+      : `Your order was cancelled.`,
+    type: 'wallet_credited',
+    link: '/wallet',
+  });
+
+  return orders[idx];
+}
+
+/**
+ * Customer-initiated refund for order line adjustments (replacement/remove).
+ * Validates order ownership — does not allow arbitrary self-credits.
+ */
+export function creditCustomerRefundForAdjustment(user, orderId, amount, reason) {
+  if (!user?.email) throw new Error('Not authenticated');
+  const order = getCollection('Order').find((o) => o.id === orderId);
+  if (!order || order.customer_email?.toLowerCase() !== user.email.toLowerCase()) {
+    throw new Error('Forbidden');
+  }
+  const amt = parseFloat(amount);
+  if (!Number.isFinite(amt) || amt <= 0) throw new Error('Invalid amount');
+  if (amt > (order.total || 0) + (order.refunded_amount || 0) + 1) {
+    throw new Error('Refund exceeds order value');
+  }
+  return creditWallet(user.email, 'customer', amt, reason || `Order adjustment — #${orderId}`, 'order_adjustment_refund');
 }

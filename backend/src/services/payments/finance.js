@@ -160,9 +160,9 @@ export function getBalance(ownerEmail, ownerType = null) {
   return w ? w.balance : 0;
 }
 
-function saveWalletChange(ownerEmail, ownerType, delta, reason) {
+function saveWalletChange(ownerEmail, ownerType, delta, reason, txType = null) {
   const wallets = getCollection('Wallet');
-  let w = wallets.find(w => w.owner_email === ownerEmail);
+  let w = wallets.find(w => w.owner_email === ownerEmail && (!ownerType || w.owner_type === ownerType));
   if (!w) {
     w = {
       id: ownerEmail.replace(/[^a-z0-9]/gi, '_') + '_wallet',
@@ -184,6 +184,7 @@ function saveWalletChange(ownerEmail, ownerType, delta, reason) {
     owner_email: ownerEmail,
     owner_type: ownerType,
     amount: delta,
+    type: txType || (delta >= 0 ? 'credit' : 'debit'),
     reason,
     balance_after: w.balance,
     created_date: new Date().toISOString(),
@@ -193,12 +194,16 @@ function saveWalletChange(ownerEmail, ownerType, delta, reason) {
   return w;
 }
 
-export function creditWallet(email, type, amount, reason) {
-  return saveWalletChange(email, type, Math.abs(amount), reason);
+/**
+ * Internal wallet mutations — not for customer-facing invoke.
+ * Customers must never call these via /api/domain/invoke (enforced in domain.js).
+ */
+export function creditWallet(email, type, amount, reason, txType = null) {
+  return saveWalletChange(email, type, Math.abs(amount), reason, txType || 'credit');
 }
 
-export function debitWallet(email, type, amount, reason) {
-  return saveWalletChange(email, type, -Math.abs(amount), reason);
+export function debitWallet(email, type, amount, reason, txType = null) {
+  return saveWalletChange(email, type, -Math.abs(amount), reason, txType || 'debit');
 }
 
 // ── Blocking logic ────────────────────────────────────────────────────────────

@@ -64,13 +64,16 @@ export function invalidateCollection(name) {
   delete collectionLoading[name];
 }
 
+/** Policy-filtered list (replaces unrestricted /raw). */
 export async function getCollection(name) {
   if (collectionCache[name]) return collectionCache[name];
   if (!collectionLoading[name]) {
-    collectionLoading[name] = apiFetch(`/api/entities/${name}/raw`).then((data) => {
-      collectionCache[name] = data;
+    collectionLoading[name] = apiFetch(
+      `/api/entities/${name}/list?sort=-created_date&limit=500`
+    ).then((data) => {
+      collectionCache[name] = Array.isArray(data) ? data : [];
       delete collectionLoading[name];
-      return data;
+      return collectionCache[name];
     });
   }
   return collectionLoading[name];
@@ -81,13 +84,9 @@ export function getCollectionSync(name) {
   return collectionCache[name] ?? [];
 }
 
-export async function saveCollection(name, data) {
-  const result = await apiFetch(`/api/entities/${name}/raw`, {
-    method: 'POST',
-    body: JSON.stringify({ data }),
-  });
-  collectionCache[name] = data;
-  return result;
+/** Raw overwrite removed — use entity create/update/delete. */
+export async function saveCollection() {
+  throw new Error('Raw collection overwrite is disabled. Use entity create/update/delete.');
 }
 
 export async function preloadCollections(names) {
@@ -147,6 +146,7 @@ export function createApiClient() {
     Transaction: makeEntityClient('Transaction'),
     DriverProfile: makeEntityClient('DriverProfile'),
     Notification: makeEntityClient('Notification'),
+    DriverIncident: makeEntityClient('DriverIncident'),
   };
 
   return { auth, entities };

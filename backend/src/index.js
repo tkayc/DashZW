@@ -1,4 +1,12 @@
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import express from 'express';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Load backend/.env even when npm is run from monorepo root
+dotenv.config({ path: path.join(__dirname, '../.env') });
+dotenv.config(); // also allow root .env as fallback
 import cors from 'cors';
 import { authRoutes } from './services/authentication/index.js';
 import entityRoutes from './routes/entities.js';
@@ -9,6 +17,17 @@ import { seedDatabase } from './services/merchant/seedData.js';
 import { runOrderTimeoutCheck } from './services/orders/orderEngine.js';
 import { ensureDemoUsers } from './services/authentication/users.js';
 import { subscribeToDbChanges } from './db/store.js';
+import { checkPostgres, isPostgresEnabled } from './db/pg.js';
+import { assertJwtConfigured } from './services/authentication/middleware.js';
+
+assertJwtConfigured();
+
+if (!isPostgresEnabled()) {
+  console.warn(
+    '[DashZW] WARNING: PostgreSQL is OFF — JSON-file auth stores passwords in PLAINTEXT. ' +
+      'Use only for local demo/dev. Never store real user data in this mode.'
+  );
+}
 
 const PORT = process.env.PORT || 3001;
 const API_VERSION = process.env.API_VERSION || 'v1';
@@ -21,14 +40,12 @@ const ORIGINS = (process.env.CORS_ORIGINS ||
 app.use(cors({ origin: ORIGINS, credentials: true }));
 app.use(express.json({ limit: '2mb' }));
 
-// Security headers placeholder
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   next();
 });
 
-// Request logging placeholder — swap for pino/winston in production
 app.use((req, _res, next) => {
   if (process.env.LOG_REQUESTS === '1') {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
@@ -36,13 +53,13 @@ app.use((req, _res, next) => {
   next();
 });
 
-function healthHandler(_req, res) {
+async function healthHandler(_req, res) {
+  const postgres = await checkPostgres();
   res.json({
     ok: true,
     service: 'dashzw-api',
     version: API_VERSION,
-    // TODO(redis): include cache status
-    // TODO(monitoring): include uptime / metrics
+    postgres,
     uptime_s: Math.round(process.uptime()),
     timestamp: new Date().toISOString(),
   });
@@ -51,7 +68,6 @@ function healthHandler(_req, res) {
 app.get('/api/health', healthHandler);
 app.get(`/api/${API_VERSION}/health`, healthHandler);
 
-// API versioning — mount under /api and /api/v1
 function mountApi(routerBase) {
   app.use(`${routerBase}/auth`, authRoutes);
   app.use(`${routerBase}/entities`, entityRoutes);
@@ -73,7 +89,7 @@ subscribeToDbChanges((collection) => {
   });
 });
 
-app.get('/api/events', (req, res) => {
+function sseHandler(req, res) {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -81,26 +97,25 @@ app.get('/api/events', (req, res) => {
   res.write(': connected\n\n');
   sseClients.add(res);
   req.on('close', () => sseClients.delete(res));
-});
+}
 
-app.get(`/api/${API_VERSION}/events`, (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders?.();
-  res.write(': connected\n\n');
-  sseClients.add(res);
-  req.on('close', () => sseClients.delete(res));
-});
+app.get('/api/events', sseHandler);
+app.get(`/api/${API_VERSION}/events`, sseHandler);
 
 ensureDemoUsers();
 seedDatabase();
 setInterval(runOrderTimeoutCheck, 60_000);
 runOrderTimeoutCheck();
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`[DashZW API] http://localhost:${PORT}`);
-  console.log(`[DashZW API] health: /api/health · /api/${API_VERSION}/health`);
-  // TODO(redis): connect cache
-  // TODO(monitoring): register metrics exporter
+  const pg = await checkPostgres();
+  if (pg.enabled && pg.ok) {
+    console.log(`[DashZW API] PostgreSQL: connected (${pg.users} users)`);
+  } else if (pg.enabled) {
+    console.error(`[DashZW API] PostgreSQL: FAILED — ${pg.message}`);
+    console.error('[DashZW API] Fix DATABASE_URL in backend/.env or root .env');
+  } else {
+    console.log('[DashZW API] PostgreSQL: off — using JSON files (backend/data)');
+  }
 });

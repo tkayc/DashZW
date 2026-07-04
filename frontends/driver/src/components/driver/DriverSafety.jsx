@@ -3,14 +3,12 @@ import { AlertTriangle, X, CheckCircle2, Loader2, Shield } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/lib/AuthContext';
-import { getCollectionSync, getCollection, saveCollection } from '@/api';
-import { createNotification } from '@/api';
+import { base44, createNotification, invalidateCollection } from '@/api';
 import { toast } from 'sonner';
 
-function saveIncident(incident) {
-  const all = getCollectionSync('DriverIncident');
-  all.push(incident);
-  saveCollection('DriverIncident', all);
+async function saveIncident(incident) {
+  await base44.entities.DriverIncident.create(incident);
+  invalidateCollection('DriverIncident');
 }
 
 export default function DriverSafety({ activeOrder }) {
@@ -38,7 +36,14 @@ export default function DriverSafety({ activeOrder }) {
           body: `${user?.full_name} triggered SOS${activeOrder ? ` on order #${activeOrder.id.slice(-6)}` : ''}. Contact immediately.`,
           type: 'order_update', link: '/admin',
         });
-        saveIncident({ id: Date.now().toString(36), driver_email: user?.email, driver_name: user?.full_name, order_id: activeOrder?.id || null, type: 'SOS', description: 'Emergency SOS triggered.', created_date: new Date().toISOString(), status: 'open' });
+        saveIncident({
+          driver_email: user?.email,
+          driver_name: user?.full_name,
+          order_id: activeOrder?.id || null,
+          type: 'SOS',
+          description: 'Emergency SOS triggered.',
+          status: 'open',
+        }).catch(() => {});
         toast.error('🆘 SOS sent to admin. Stay safe.', { duration: 8000 });
         setShowSOS(false);
       }
@@ -52,10 +57,29 @@ export default function DriverSafety({ activeOrder }) {
     if (!incidentType) { toast.error('Select an incident type'); return; }
     setSubmitting(true);
     await new Promise(r => setTimeout(r, 500));
-    saveIncident({ id: Date.now().toString(36), driver_email: user?.email, driver_name: user?.full_name, order_id: activeOrder?.id || null, type: incidentType, description: incidentDesc, created_date: new Date().toISOString(), status: 'open' });
-    createNotification({ recipient_email: 'admin@dashzw.com', title: `⚠️ Incident: ${incidentType}`, body: `${user?.full_name}: ${incidentDesc || incidentType}`, type: 'order_update', link: '/admin' });
-    setSubmitting(false); setSubmitted(true);
-    toast.success('Incident reported successfully.');
+    try {
+      await saveIncident({
+        driver_email: user?.email,
+        driver_name: user?.full_name,
+        order_id: activeOrder?.id || null,
+        type: incidentType,
+        description: incidentDesc,
+        status: 'open',
+      });
+      createNotification({
+        recipient_email: 'admin@dashzw.com',
+        title: `⚠️ Incident: ${incidentType}`,
+        body: `${user?.full_name}: ${incidentDesc || incidentType}`,
+        type: 'order_update',
+        link: '/admin',
+      });
+      setSubmitted(true);
+      toast.success('Incident reported successfully.');
+    } catch (e) {
+      toast.error(e.message || 'Failed to report');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const TYPES = ['Road accident','Vehicle breakdown','Customer dispute','Unsafe area','Order tampering','Other'];

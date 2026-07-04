@@ -191,9 +191,9 @@ export default function OrderDetail() {
     );
 
     if (refundAmount > 0 && order.payment_method !== 'cash_on_delivery') {
-      const { refundToCustomerWallet } = await import('@/api');
-      refundToCustomerWallet(
-        order.customer_email,
+      const { creditCustomerRefundForAdjustment } = await import('@/api');
+      await creditCustomerRefundForAdjustment(
+        order.id,
         refundAmount,
         `Order adjustment: ${oldItem.name} - Order #${order.id.slice(-6)}`
       );
@@ -319,24 +319,13 @@ export default function OrderDetail() {
             <p className="text-xs text-orange-800 flex-1">You can cancel within <strong>{secsLeft}s</strong></p>
             <button
               onClick={async () => {
-                await base44.entities.Order.update(order.id, { status: ORDER_STATUS.CANCELLED, cancel_reason: 'customer' });
-                notifyOrderStatusChanged(order, ORDER_STATUS.CANCELLED);
-                // Refund wallet for online payments
-                if (order.payment_method !== 'cash_on_delivery' && order.total > 0) {
-                  const { creditWallet } = await import('@/api');
-                  const { createNotification } = await import('@/api');
-                  creditWallet(order.customer_email, 'customer', order.total,
-                    `Refund — cancelled order from ${order.shop_name}`);
-                  createNotification({
-                    recipient_email: order.customer_email,
-                    title: `💰 Refund R${order.total?.toFixed(2)}`,
-                    body: `Your payment of R${order.total?.toFixed(2)} for the cancelled order has been refunded to your DashZW wallet.`,
-                    type: 'wallet_credited',
-                    link: '/profile',
-                  });
-                  toast.success(`Order cancelled — R${order.total?.toFixed(2)} refunded to your wallet`);
-                } else {
+                try {
+                  const { cancelOwnOrder } = await import('@/api');
+                  await cancelOwnOrder(order.id);
+                  notifyOrderStatusChanged(order, ORDER_STATUS.CANCELLED);
                   toast.success('Order cancelled');
+                } catch (e) {
+                  toast.error(e.message || 'Could not cancel');
                 }
               }}
               className="flex items-center gap-1 bg-orange-600 text-white text-xs font-semibold px-3 py-1.5 rounded-xl">

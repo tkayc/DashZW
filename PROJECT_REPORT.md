@@ -94,19 +94,43 @@ All apps share one API. Domain models live under `backend/src/domain` and are mi
 
 | Item | Status |
 |------|--------|
-| JSON mock store | Active |
-| JWT auth | Active |
+| JSON mock store | Active when `DATABASE_URL` unset (plaintext passwords — dev only) |
+| PostgreSQL auth | Active when `DATABASE_URL` set (`crypt()` passwords) |
+| JWT auth | Active; **requires `JWT_SECRET` in production** (no silent fallback) |
+| Entity authorization | **Enforced** via `entityPolicy.js` (role + ownership per collection) |
+| Raw collection routes | **Removed** (`/:collection/raw` deleted) |
+| Customer wallet | **View-only**; mutations only via server checkout / system refunds |
+| Checkout wallet debit | Server-side in `orderEngine.placeOrder` (never trusts client amount) |
 | SSE realtime | Active |
-| Health checks | `/api/health`, `/api/v1/health` |
+| Health checks | `/api/health` includes `postgres` status |
 | API versioning | `/api` + `/api/v1` mounts |
 | Request logging | `LOG_REQUESTS=1` |
 | Security headers | Basic (`nosniff`, `SAMEORIGIN`) |
+| Git hygiene | Root `.gitignore` excludes `node_modules/`, `dist/`, `.env` |
+| Auth verification script | `backend/scripts/verify-entity-auth.mjs` |
 | Docker / compose | Placeholders |
-| Redis / Postgres | Documented placeholders only |
-| Env configuration | `.env.example` |
+| Redis | Placeholder only |
+| Env configuration | `backend/.env.example` |
 | Error boundaries | Frontends |
 | Caching | Placeholder comments |
 | Monitoring | Placeholder sections |
+
+### Entity auth verification
+
+```bash
+# API must be running
+node backend/scripts/verify-entity-auth.mjs
+```
+
+Confirms: customer cannot write Wallet / invoke debitWallet; Settlement not listed; partner only sees own Shop; `/raw` is 404.
+
+### Remaining known gaps
+
+- Orders, merchants, products, wallets still primarily JSON-backed (Postgres schema exists; only auth users wired to PG so far)
+- Domain `invoke` still exposes many finance methods to partner/admin without fine-grained argument checks
+- No rate limiting / CSRF / refresh-token rotation
+- Referral credits still write customer wallets via internal `creditWallet` (not customer-callable)
+- Driver withdraw remains available to partner/admin flows (by design)
 
 ---
 
@@ -125,9 +149,9 @@ Reseed: delete `backend/data/*.json` (or `_meta.json`) and restart API.
 
 ## 8. Explicit non-goals (current phase)
 
-- No PostgreSQL / real DB migrations  
+- Full entity layer on PostgreSQL (schema ready; runtime still mostly JSON)  
 - No live SMS/email/OAuth/WebAuthn providers  
-- No real payment rails or payouts  
+- No real payment rails or customer wallet top-up  
 - No production maps/navigation SDK  
 - No multi-merchant cart (placeholder only)
 
@@ -135,10 +159,10 @@ Reseed: delete `backend/data/*.json` (or `_meta.json`) and restart API.
 
 ## 9. Recommended next phase
 
-1. PostgreSQL repositories behind existing entity contracts  
-2. Enforce permissions on every API route  
+1. Migrate Order / Shop / Wallet / Transaction repositories to PostgreSQL  
+2. Tighten domain `invoke` argument authorization (partner may only top up known drivers, etc.)  
 3. Real OTP, OAuth, email verification  
-4. Payment provider integration (EcoCash / cards)  
+4. Payment provider integration (EcoCash / cards) — not customer wallet top-up  
 5. Redis for sessions, rate limits, cache  
 6. Object storage for delivery photos & documents  
 7. Observability (structured logs, metrics, error tracking)  

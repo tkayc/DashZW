@@ -2,17 +2,13 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { useRealtimeQuery as useQuery } from '@/api';
-import { Wallet, ArrowDownLeft, RefreshCw, Plus, ArrowUpRight, Gift, Star } from 'lucide-react';
+import { Wallet, ArrowDownLeft, RefreshCw, Gift, Star } from 'lucide-react';
 import { getCollectionSync, getCollection } from '@/api';
 import PageHeader from '@/components/layout/PageHeader';
-import { toast } from 'sonner';
 
 /**
- * Wallet module — balance, history, refunds, cashback, loyalty, gift cards.
- * Top-up / withdraw are placeholders.
- *
- * TODO(postgresql): wallets, wallet_transactions, cashback_rules.
- * TODO(payments): Top-up / withdraw providers.
+ * Customer wallet — view-only balance and history.
+ * Balance changes only via server-side checkout deduction and system refunds.
  */
 function getCustomerWalletBalance(email) {
   if (!email) return 0;
@@ -64,24 +60,14 @@ export default function CustomerWallet() {
           <span className="text-sm">Available balance</span>
         </div>
         <p className="text-4xl font-bold">R{balance.toFixed(2)}</p>
-        <p className="text-xs opacity-70 mt-1">Applied automatically at checkout when enabled</p>
+        <p className="text-xs opacity-70 mt-1">Wallet balance is used automatically at checkout</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 mb-4">
-        <button
-          type="button"
-          onClick={() => toast.message('Top up', { description: 'Payment provider not connected yet.' })}
-          className="flex items-center justify-center gap-2 bg-card border border-border rounded-2xl py-3 text-sm font-semibold"
-        >
-          <Plus className="w-4 h-4 text-primary" /> Top up
-        </button>
-        <button
-          type="button"
-          onClick={() => toast.message('Withdraw', { description: 'Withdrawals coming soon.' })}
-          className="flex items-center justify-center gap-2 bg-card border border-border rounded-2xl py-3 text-sm font-semibold"
-        >
-          <ArrowUpRight className="w-4 h-4 text-primary" /> Withdraw
-        </button>
+      <div className="bg-card border border-border/50 rounded-2xl px-4 py-3 mb-4">
+        <p className="text-sm text-muted-foreground">
+          This balance is view-only. You cannot top up or withdraw. Credits come from refunds and
+          promotions; deductions happen only when you pay for an order at checkout.
+        </p>
       </div>
 
       <div className="grid grid-cols-2 gap-3 mb-4">
