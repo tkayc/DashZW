@@ -76,6 +76,26 @@ router.post('/invoke', authMiddleware, async (req, res) => {
       args[1] = args[1] || 'customer';
     }
 
+    // Notifications: customers/drivers may only access their own inbox
+    if (
+      key === 'notifications.getNotifications' ||
+      key === 'notifications.getUnreadCount' ||
+      key === 'notifications.markAllRead'
+    ) {
+      const email = args[0];
+      const userEmail = req.user.email.toLowerCase();
+      const isDriverBroadcast =
+        email === '__drivers__' && ['driver', 'admin'].includes(req.user.role);
+      if (isCustomer(req.user)) {
+        if (email && email.toLowerCase() !== userEmail) {
+          return res.status(403).json({ message: 'Forbidden' });
+        }
+        args[0] = req.user.email;
+      } else if (!isDriverBroadcast && email && email.toLowerCase() !== userEmail && req.user.role !== 'admin') {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+    }
+
     // placeOrder / adjustment refund — inject authenticated user as first arg
     if (key === 'orderEngine.placeOrder') {
       const result = await orderEngine.placeOrder(req.user, args[0] || {});

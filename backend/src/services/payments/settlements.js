@@ -120,7 +120,7 @@ export async function settlePartnerWallet(partnerEmail, shopName, method, refere
   records.push(record);
   saveCollection(SETTLEMENT_KEY, records);
 
-  createNotification({
+  await createNotification({
     recipient_email: partnerEmail,
     title: '💳 Wallet Settled',
     body: `${balance.toFixed(2)} paid to you via ${method.toUpperCase()} (ref: ${reference}). Wallet reset to $0.`,
@@ -197,7 +197,7 @@ export async function driverWithdraw({ driverEmail, driverName, partnerEmail, sh
   records.push(record);
   saveCollection(WITHDRAWAL_KEY, records);
 
-  createNotification({
+  await createNotification({
     recipient_email: driverEmail,
     title: '💵 Withdrawal Processed',
     body: `You withdrew ${amount.toFixed(2)} at ${shopName}. Received: ${cashToDriver.toFixed(2)} cash (after ${WITHDRAWAL_FEE} fee). New balance: ${(balance - amount).toFixed(2)}`,

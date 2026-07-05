@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { base44, cacheUser, getToken, setToken, preloadCollections } from '@/api';
+import { markSplashPending } from '@shared/hooks/useAppSplash';
 
 const AuthContext = createContext();
 const REQUIRED_ROLE = 'admin';
@@ -8,12 +9,16 @@ function isAdminRole(role) {
   return role === 'admin' || role === 'super_admin';
 }
 
-async function safePreload(keys) {
+async function safePreload(keys, limit = 80) {
   try {
-    await preloadCollections(keys);
+    await preloadCollections(keys, limit);
   } catch (e) {
     console.warn('[DashZW] preload failed', e);
   }
+}
+
+function warmCaches() {
+  void safePreload(['Order', 'Wallet', 'Transaction', 'Notification', 'Shop', 'Settlement', 'AdminPromotion'], 60);
 }
 
 export const AuthProvider = ({ children }) => {
@@ -38,7 +43,7 @@ export const AuthProvider = ({ children }) => {
         cacheUser(u);
         setUser(u);
         setIsAuth(true);
-        await safePreload(['Order', 'Wallet', 'Transaction', 'Notification', 'Shop', 'Settlement', 'AdminPromotion']);
+        warmCaches();
       } catch {
         setToken(null);
         cacheUser(null);
@@ -57,7 +62,8 @@ export const AuthProvider = ({ children }) => {
     cacheUser(u);
     setUser(u);
     setIsAuth(true);
-    await safePreload(['Order', 'Wallet', 'Transaction', 'Notification', 'Shop', 'Settlement', 'AdminPromotion']);
+    markSplashPending('admin');
+    warmCaches();
     return u;
   };
 

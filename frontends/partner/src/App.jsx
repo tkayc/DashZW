@@ -20,9 +20,13 @@ import PartnerShopGate from '@/pages/PartnerShopGate';
 import PartnerInventory from '@/pages/PartnerInventory';
 import PartnerAnalytics from '@/pages/PartnerAnalytics';
 import PartnerSection from '@/pages/PartnerSection';
+import PartnerLiveMap from '@/pages/PartnerLiveMap';
+import SplashScreen from '@shared/components/SplashScreen';
+import { useAppSplash } from '@shared/hooks/useAppSplash';
 
 function AppRoutes() {
   const { isLoadingAuth, isAuthenticated, user } = useAuth();
+  const { showSplash, dismissSplash } = useAppSplash('partner', isAuthenticated);
   useSystemNotifications(user?.email);
 
   if (isLoadingAuth) {
@@ -39,6 +43,16 @@ function AppRoutes() {
         <Route path="/login" element={<Login />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
+    );
+  }
+
+  if (showSplash) {
+    return (
+      <SplashScreen
+        onDone={dismissSplash}
+        tagline="Merchant portal"
+        footer="Grow your business"
+      />
     );
   }
 
@@ -78,6 +92,7 @@ function AppRoutes() {
         <Route path="/orders" element={<PartnerOrdersPage />} />
         <Route path="/promotions" element={<PartnerPromotionsPage />} />
         <Route path="/shop" element={<PartnerShopPage />} />
+        <Route path="/delivery-map" element={<PartnerLiveMap />} />
         <Route path="/driver-topup" element={<PartnerDriverTopUp />} />
         <Route path="/driver-withdrawal" element={<PartnerDriverWithdraw />} />
         <Route path="/earnings" element={<PartnerEarnings />} />

@@ -12,6 +12,9 @@ export function createAppViteConfig(appName, port) {
     resolve: {
       alias: {
         '@': path.join(appDir, 'src'),
+        '@location': path.join(frontendsRoot, 'shared/location'),
+        '@assets': path.join(frontendsRoot, 'shared/assets'),
+        '@shared': path.join(frontendsRoot, 'shared'),
       },
     },
   };

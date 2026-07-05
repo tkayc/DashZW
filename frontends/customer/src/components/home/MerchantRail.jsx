@@ -8,9 +8,9 @@ export default function MerchantRail({ title, shops, isLoading, seeAllTo = '/exp
     return (
       <div className="px-4 mt-6">
         <div className="h-5 w-36 bg-muted rounded-lg animate-pulse mb-3" />
-        <div className="flex gap-3 overflow-hidden">
+        <div className="flex gap-4 overflow-hidden">
           {[1, 2].map((i) => (
-            <div key={i} className="min-w-[260px] h-44 bg-muted rounded-2xl animate-pulse" />
+            <div key={i} className="w-[268px] shrink-0 h-44 bg-muted rounded-2xl animate-pulse" />
           ))}
         </div>
       </div>
@@ -37,9 +37,9 @@ export default function MerchantRail({ title, shops, isLoading, seeAllTo = '/exp
           </Link>
         )}
       </div>
-      <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
+      <div className="flex gap-4 overflow-x-auto pb-3 pt-0.5 -mx-1 px-1" style={{ scrollbarWidth: 'none' }}>
         {shops.slice(0, 8).map((shop) => (
-          <div key={shop.id} className="min-w-[260px]">
+          <div key={shop.id} className="w-[268px] shrink-0">
             <ShopCard shop={shop} variant="wide" />
           </div>
         ))}

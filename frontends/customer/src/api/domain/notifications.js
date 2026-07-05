@@ -21,7 +21,7 @@ export function subscribeToDbChanges(fn) {
     try {
       const { collection } = JSON.parse(ev.data);
       if (collection) invalidateCollection(collection);
-      fn(collection);
+      if (!collection || collection === 'Notification') fn(collection);
     } catch {
       fn();
     }

@@ -14,7 +14,7 @@
 import { getCollection, saveCollection, localDb } from '../../db/localDb.js';
 import { getUsersFile } from '../../db/store.js';
 import { creditWallet, debitWallet, getBalance } from '../payments/finance.js';
-import { createNotification } from '../notifications/notifications.js';
+import { createNotification, notifyOrderPlaced } from '../notifications/notifications.js';
 import {
   ORDER_STATUS,
   ORDER_STATUS_ON_CREATE,
@@ -33,7 +33,7 @@ export async function runOrderTimeoutCheck() {
     if (age < 10 * 60 * 1000) continue;
 
     const merchantName = order.merchant_name || order.shop_name;
-    createNotification({
+    await createNotification({
       recipient_email: order.customer_email,
       title: '❌ Order Auto-Cancelled',
       body: `Your order from ${merchantName} was cancelled — the merchant didn't respond in time.`,
@@ -43,7 +43,7 @@ export async function runOrderTimeoutCheck() {
     if (order.payment_method !== 'cash_on_delivery' && order.total > 0) {
       await creditWallet(order.customer_email, 'customer', order.total,
         `Refund — auto-cancelled order from ${merchantName}`);
-      createNotification({
+      await createNotification({
         recipient_email: order.customer_email,
         title: `💰 Refund ${order.total?.toFixed(2)}`,
         body: `Your payment for the cancelled order has been refunded to your wallet.`,
@@ -113,7 +113,7 @@ export async function awardPoints(email, orderTotal) {
   }
   saveCollection(POINTS_KEY, all);
 
-  createNotification({
+  await createNotification({
     recipient_email: email,
     title: `⭐ +${pts} loyalty points`,
     body: `You earned ${pts} points on this order. Total: ${getPoints(email).points} pts.`,
@@ -139,7 +139,7 @@ export async function checkAndRedeemPoints(email) {
 
   await creditWallet(email, 'customer', credit,
     `Loyalty reward — ${sets * REDEEM_AT} points redeemed`);
-  createNotification({
+  await createNotification({
     recipient_email: email,
     title: `🎁 ${credit} Loyalty Reward!`,
     body: `${sets * REDEEM_AT} points redeemed → ${credit} added to your wallet.`,
@@ -177,14 +177,16 @@ export async function applyReferral(newUserEmail, referralCode) {
   });
   saveCollection('Referral', users);
 
-  [referrer.email, newUserEmail].forEach(email => createNotification({
-    recipient_email: email,
-    title: '🎉 R10 Referral Bonus!',
-    body: email === referrer.email
-      ? `${newUserEmail} joined using your referral code!`
-      : `Welcome to DashZW! R10 has been added to your wallet.`,
-    type: 'wallet_credited', link: '/profile',
-  }));
+  for (const email of [referrer.email, newUserEmail]) {
+    await createNotification({
+      recipient_email: email,
+      title: '🎉 R10 Referral Bonus!',
+      body: email === referrer.email
+        ? `${newUserEmail} joined using your referral code!`
+        : `Welcome to DashZW! R10 has been added to your wallet.`,
+      type: 'wallet_credited', link: '/profile',
+    });
+  }
 }
 
 /**
@@ -241,6 +243,8 @@ export async function placeOrder(user, payload = {}) {
     delivery_code: orderFields.delivery_code || String(Math.floor(1000 + Math.random() * 9000)),
   });
 
+  void notifyOrderPlaced(order);
+
   return {
     order,
     wallet_applied: walletApplied,
@@ -296,7 +300,7 @@ export async function cancelOwnOrder(user, orderId) {
     );
   }
 
-  createNotification({
+  await createNotification({
     recipient_email: user.email,
     title: refunded > 0 ? `💰 Refund ${refunded.toFixed(2)}` : 'Order cancelled',
     body: refunded > 0

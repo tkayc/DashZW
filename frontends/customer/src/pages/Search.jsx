@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
-import { useNavigate } from 'react-router-dom';
-import { Search as SearchIcon, X, Package, ArrowLeft, Tag, SlidersHorizontal } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Search as SearchIcon, Package, ArrowLeft, Tag, SlidersHorizontal } from 'lucide-react';
 import { base44 } from '@/api';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { getShopStatus } from '@/api';
 import { MERCHANT_CATEGORIES, getMerchantCategory } from '@/domain/merchantCategories';
+import CategoryIcon from '@shared/components/CategoryIcon.jsx';
 
 const SORTS = [
   { id: 'relevance', label: 'Relevance' },
@@ -21,7 +21,8 @@ const SORTS = [
  */
 export default function Search() {
   const navigate = useNavigate();
-  const [query, setQuery] = useState('');
+  const [searchParams] = useSearchParams();
+  const query = searchParams.get('q') || '';
   const [merchants, setMerchants] = useState([]);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -127,34 +128,24 @@ export default function Search() {
   }, [filters]);
 
   return (
-    <div className="px-4 pt-4 pb-4">
-      <div className="flex items-center gap-3 mb-3">
+    <div className="px-4 pt-2 pb-4">
+      <div className="flex items-center justify-between gap-3 mb-3">
         <button
           type="button"
           onClick={() => navigate(-1)}
           className="w-9 h-9 rounded-full bg-muted flex items-center justify-center shrink-0"
+          aria-label="Go back"
         >
           <ArrowLeft className="w-4 h-4" />
         </button>
-        <div className="relative flex-1">
-          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            autoFocus
-            placeholder="Merchants, products, categories…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="pl-10 pr-9 rounded-2xl bg-muted/60 border-0 h-11"
-          />
-          {query && (
-            <button type="button" onClick={() => setQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2">
-              <X className="w-4 h-4 text-muted-foreground" />
-            </button>
-          )}
-        </div>
+        <p className="flex-1 text-sm font-semibold text-foreground truncate min-w-0">
+          {query ? `Results for “${query}”` : 'Search'}
+        </p>
         <button
           type="button"
           onClick={() => setShowFilters((v) => !v)}
-          className="relative w-10 h-10 rounded-xl bg-muted flex items-center justify-center"
+          className="relative w-9 h-9 rounded-xl bg-muted flex items-center justify-center shrink-0"
+          aria-label="Filters"
         >
           <SlidersHorizontal className="w-4 h-4" />
           {activeFilterCount > 0 && (
@@ -299,10 +290,10 @@ export default function Search() {
       )}
 
       {!loading && !query && (
-        <div className="text-center py-16">
-          <SearchIcon className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
-          <p className="font-semibold text-foreground">Search for anything</p>
-          <p className="text-sm text-muted-foreground mt-1">Merchants, products, categories…</p>
+        <div className="text-center py-12">
+          <SearchIcon className="w-10 h-10 text-muted-foreground/30 mx-auto mb-2" />
+          <p className="font-semibold text-foreground text-sm">Type in the search bar above</p>
+          <p className="text-xs text-muted-foreground mt-1">Merchants, products, categories…</p>
         </div>
       )}
 
@@ -321,7 +312,7 @@ export default function Search() {
                     onClick={() => navigate(`/explore?category=${cat.id}`)}
                     className="flex items-center gap-2 bg-card border border-border rounded-2xl px-3 py-2 text-sm font-medium"
                   >
-                    <span>{cat.icon}</span>
+                    <CategoryIcon category={cat} size={18} />
                     {cat.label}
                   </button>
                 ))}

@@ -12,10 +12,14 @@ import DriverDashboard from '@/pages/DriverDashboard';
 import DriverAvailableJobs from '@/pages/DriverAvailableJobs';
 import DriverActiveDeliveries from '@/pages/DriverActiveDeliveries';
 import DriverProfilePage from '@/pages/DriverProfilePage';
+import DriverNavigation from '@/pages/DriverNavigation';
 import DriverWallet from '@/pages/DriverWallet';
+import SplashScreen from '@shared/components/SplashScreen';
+import { useAppSplash } from '@shared/hooks/useAppSplash';
 
 function AppRoutes() {
   const { isLoadingAuth, isAuthenticated, user } = useAuth();
+  const { showSplash, dismissSplash } = useAppSplash('driver', isAuthenticated);
   useSystemNotifications(user?.email);
 
   if (isLoadingAuth) {
@@ -35,12 +39,23 @@ function AppRoutes() {
     );
   }
 
+  if (showSplash) {
+    return (
+      <SplashScreen
+        onDone={dismissSplash}
+        tagline="Driver hub"
+        footer="On the road with DashZW"
+      />
+    );
+  }
+
   return (
     <Routes>
       <Route element={<DriverLayout />}>
         <Route path="/" element={<DriverDashboard />} />
         <Route path="/jobs" element={<DriverAvailableJobs />} />
         <Route path="/active" element={<DriverActiveDeliveries />} />
+        <Route path="/navigate/:orderId" element={<DriverNavigation />} />
         <Route path="/wallet" element={<DriverWallet />} />
         <Route path="/profile" element={<DriverProfilePage />} />
       </Route>

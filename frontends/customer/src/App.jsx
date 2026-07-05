@@ -6,6 +6,7 @@ import { queryClientInstance } from '@/lib/query-client';
 import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import { CartProvider } from '@/lib/CartContext';
+import { LocationProvider } from '@/lib/LocationContext';
 import { ThemeProvider } from '@/lib/ThemeContext';
 import { useSystemNotifications } from '@/hooks/usePushNotifications';
 import ErrorBoundary from '@/components/ErrorBoundary';
@@ -14,6 +15,8 @@ import { PERMISSIONS } from '@/domain/permissions';
 import AppLayout from '@/components/layout/AppLayout';
 import Login from '@/pages/Login';
 import Home from '@/pages/Home';
+import SplashScreen from '@shared/components/SplashScreen';
+import { useAppSplash } from '@shared/hooks/useAppSplash';
 
 // Lazy-loaded routes for production performance
 const SignUp = lazy(() => import('@/pages/SignUp'));
@@ -68,6 +71,8 @@ function RequireAuth({ children }) {
 
 function AppRoutes() {
   const { isLoadingAuth, isAuthenticated, isGuest, user } = useAuth();
+  const canBrowse = isAuthenticated || isGuest;
+  const { showSplash, dismissSplash } = useAppSplash('customer', canBrowse);
   useSystemNotifications(user?.email);
 
   if (isLoadingAuth) {
@@ -77,8 +82,6 @@ function AppRoutes() {
       </div>
     );
   }
-
-  const canBrowse = isAuthenticated || isGuest;
 
   if (!canBrowse) {
     return (
@@ -96,9 +99,20 @@ function AppRoutes() {
     );
   }
 
+  if (showSplash) {
+    return (
+      <SplashScreen
+        onDone={dismissSplash}
+        tagline="Food delivery, made local"
+        footer="Delivering happiness"
+      />
+    );
+  }
+
   return (
     <CustomerAppGuard>
       <CartProvider>
+        <LocationProvider>
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <Login />} />
@@ -153,6 +167,7 @@ function AppRoutes() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
+        </LocationProvider>
       </CartProvider>
     </CustomerAppGuard>
   );

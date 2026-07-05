@@ -2,15 +2,24 @@ import React, { createContext, useState, useContext, useEffect, useCallback } fr
 import { base44, cacheUser, getToken, setToken, preloadCollections } from '@/api';
 import { ROLES, normalizeRole } from '@/domain/roles';
 import { PERMISSIONS, requirePermission } from '@/domain/permissions';
+import { markSplashPending } from '@shared/hooks/useAppSplash';
 
 const AuthContext = createContext();
 const REQUIRED_ROLE = ROLES.CUSTOMER;
 const REMEMBER_KEY = 'dashzw_remember_me';
 const GUEST_KEY = 'dashzw_guest_mode';
 
-async function safePreload(keys) {
+const PRELOAD_CRITICAL = ['Shop', 'Wallet', 'Notification'];
+const PRELOAD_BACKGROUND = ['Order', 'Transaction', 'MenuItem', 'Promotion', 'Branch'];
+
+function warmCaches() {
+  void safePreload(PRELOAD_CRITICAL, 50);
+  void safePreload(PRELOAD_BACKGROUND, 40);
+}
+
+async function safePreload(keys, limit) {
   try {
-    await preloadCollections(keys);
+    await preloadCollections(keys, limit);
   } catch (e) {
     console.warn('[DashZW] preload failed', e);
   }
@@ -51,7 +60,7 @@ export const AuthProvider = ({ children }) => {
         setIsGuest(false);
         setEmailVerified(!!u.email_verified);
         localStorage.removeItem(GUEST_KEY);
-        await safePreload(['Shop', 'Order', 'Wallet', 'Transaction', 'Notification', 'MenuItem', 'Promotion', 'Branch']);
+        warmCaches();
       } catch {
         setToken(null);
         cacheUser(null);
@@ -80,7 +89,8 @@ export const AuthProvider = ({ children }) => {
     setIsGuest(false);
     setEmailVerified(!!u.email_verified);
     localStorage.removeItem(GUEST_KEY);
-    await safePreload(['Shop', 'Order', 'Wallet', 'Transaction', 'Notification', 'MenuItem', 'Promotion', 'Branch']);
+    markSplashPending('customer');
+    warmCaches();
     return u;
   };
 
@@ -92,7 +102,8 @@ export const AuthProvider = ({ children }) => {
     setIsGuest(false);
     setEmailVerified(false);
     localStorage.removeItem(GUEST_KEY);
-    await safePreload(['Shop', 'Order', 'Wallet', 'Transaction', 'Notification', 'MenuItem', 'Promotion', 'Branch']);
+    markSplashPending('customer');
+    warmCaches();
     return u;
   };
 
@@ -103,6 +114,7 @@ export const AuthProvider = ({ children }) => {
     setIsAuth(false);
     setIsGuest(true);
     localStorage.setItem(GUEST_KEY, '1');
+    markSplashPending('customer');
   }, []);
 
   const logout = () => {

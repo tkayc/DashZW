@@ -12,6 +12,9 @@ import AdminDashboard from '@/pages/AdminDashboard';
 import AdminUsers from '@/pages/AdminUsers';
 import AdminSection from '@/pages/AdminSection';
 import PlatformSettings from '@/pages/PlatformSettings';
+import AdminLiveMap from '@/pages/AdminLiveMap';
+import SplashScreen from '@shared/components/SplashScreen';
+import { useAppSplash } from '@shared/hooks/useAppSplash';
 
 const SECTIONS = [
   'customers', 'drivers', 'merchants', 'orders', 'support', 'refunds',
@@ -21,6 +24,7 @@ const SECTIONS = [
 
 function AppRoutes() {
   const { isLoadingAuth, isAuthenticated, user } = useAuth();
+  const { showSplash, dismissSplash } = useAppSplash('admin', isAuthenticated);
   useSystemNotifications(user?.email);
 
   if (isLoadingAuth) {
@@ -40,12 +44,23 @@ function AppRoutes() {
     );
   }
 
+  if (showSplash) {
+    return (
+      <SplashScreen
+        onDone={dismissSplash}
+        tagline="Enterprise console"
+        footer="Operations at a glance"
+      />
+    );
+  }
+
   return (
     <Routes>
       <Route element={<AdminLayout />}>
         <Route path="/" element={<AdminDashboard />} />
         <Route path="/users" element={<AdminUsers />} />
         <Route path="/settings" element={<PlatformSettings />} />
+        <Route path="/live-map" element={<AdminLiveMap />} />
         {SECTIONS.map((s) => (
           <Route key={s} path={`/${s}`} element={<AdminSection section={s} />} />
         ))}

@@ -60,28 +60,34 @@ const collectionCache = {};
 const collectionLoading = {};
 
 export function invalidateCollection(name) {
-  delete collectionCache[name];
-  delete collectionLoading[name];
+  Object.keys(collectionCache).forEach((key) => {
+    if (key === name || key.startsWith(`${name}:`)) delete collectionCache[key];
+  });
+  Object.keys(collectionLoading).forEach((key) => {
+    if (key === name || key.startsWith(`${name}:`)) delete collectionLoading[key];
+  });
 }
 
 /** Policy-filtered list (replaces unrestricted /raw). */
-export async function getCollection(name) {
-  if (collectionCache[name]) return collectionCache[name];
-  if (!collectionLoading[name]) {
-    collectionLoading[name] = apiFetch(
-      `/api/entities/${name}/list?sort=-created_date&limit=500`
+export async function getCollection(name, limit = 100) {
+  const cacheKey = `${name}:${limit}`;
+  if (collectionCache[cacheKey]) return collectionCache[cacheKey];
+  if (!collectionLoading[cacheKey]) {
+    collectionLoading[cacheKey] = apiFetch(
+      `/api/entities/${name}/list?sort=-created_date&limit=${limit}`
     ).then((data) => {
-      collectionCache[name] = Array.isArray(data) ? data : [];
-      delete collectionLoading[name];
-      return collectionCache[name];
+      collectionCache[cacheKey] = Array.isArray(data) ? data : [];
+      if (limit === 100) collectionCache[name] = collectionCache[cacheKey];
+      delete collectionLoading[cacheKey];
+      return collectionCache[cacheKey];
     });
   }
-  return collectionLoading[name];
+  return collectionLoading[cacheKey];
 }
 
 /** Sync read from cache (call after preload or getCollection) */
 export function getCollectionSync(name) {
-  return collectionCache[name] ?? [];
+  return collectionCache[name] ?? collectionCache[`${name}:100`] ?? [];
 }
 
 /** Raw overwrite removed — use entity create/update/delete. */
@@ -89,8 +95,8 @@ export async function saveCollection() {
   throw new Error('Raw collection overwrite is disabled. Use entity create/update/delete.');
 }
 
-export async function preloadCollections(names) {
-  await Promise.all(names.map((n) => getCollection(n)));
+export async function preloadCollections(names, limit = 80) {
+  await Promise.all(names.map((n) => getCollection(n, limit)));
 }
 
 export function createApiClient() {

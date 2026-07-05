@@ -17,6 +17,12 @@ You already ran `000` and `001`. Do this next.
 2. Run: `backend/sql/003_usd_variants_driver_job.sql`
 3. This sets USD-scale prices, adds a sample pizza with sizes/add-ons, and one **ready_for_pickup** order for the driver app
 
+### Step 1c — Location & maps architecture (required for addresses / live tracking)
+
+1. In the same Query Tool on **dashzw**
+2. Run: `backend/sql/004_location_architecture.sql`
+3. This extends `user_addresses`, adds driver GPS history, delivery routes, order tracking events, and seeds a demo Auckland Park address for `customer@demo.com`
+
 ### Step 2 — Env file
 
 `backend/.env` must contain your real password:
@@ -56,6 +62,9 @@ Terminal should show: `PostgreSQL: connected (13 users)`
 | Orders | `orders` + `order_items` |
 | Wallets / transactions | `wallets`, `transactions` |
 | Notifications, promos, incidents | matching tables |
+| Saved addresses | `user_addresses` via `/api/location/addresses` |
+| Driver GPS history | `driver_location_history` |
+| Delivery routes / tracking | `delivery_routes`, `order_tracking_events` |
 
 If `DATABASE_URL` is missing, the API falls back to JSON files in `backend/data/`.
 

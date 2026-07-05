@@ -1,29 +1,33 @@
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { base44 } from '@/api';
 import { useRealtimeQuery as useQuery } from '@/api';
 import { useAuth } from '@/lib/AuthContext';
+import { useDeliveryLocation } from '@/lib/LocationContext';
+import { locationApi } from '@/api/location';
 import HeroBanner from '@/components/home/HeroBanner';
 import CategoryScroll from '@/components/home/CategoryScroll';
 import MerchantRail from '@/components/home/MerchantRail';
-import { MOCK_DEALS } from '@/domain/promotions';
+import { SHOP_DEAL_ADS } from '@/domain/promotions';
 import { getRecentlyViewedIds } from '@/lib/recentlyViewed';
 import { isActiveOrderStatus } from '@/domain/orderStates';
+import { base44 } from '@/api';
 
-/**
- * Customer home — greeting + discovery rails (mock ranking).
- * TODO(postgresql): Personalisation queries for recommended / trending.
- */
 export default function Home() {
   const { user, isGuest } = useAuth();
+  const { delivery, sort, setSort, sortOptions } = useDeliveryLocation();
   const [activeCategory, setActiveCategory] = useState(null);
   const hour = new Date().getHours();
-  const greeting =
-    hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
-  const { data: shops = [], isLoading } = useQuery({
-    queryKey: ['shops'],
-    queryFn: () => base44.entities.Shop.list('-created_date', 50),
+  const { data: merchants = [], isLoading } = useQuery({
+    queryKey: ['merchants-discover', delivery?.lat, delivery?.lng, sort, activeCategory],
+    queryFn: () =>
+      delivery?.lat != null
+        ? locationApi.discoverMerchants({ lat: delivery.lat, lng: delivery.lng, sort, category: activeCategory || undefined })
+        : base44.entities.Shop.list('-created_date', 50).then((shops) =>
+            shops.filter((s) => s.approval_status !== 'rejected').map((s) => ({ ...s, distance_km: null }))
+          ),
+    enabled: true,
   });
 
   const { data: orders = [] } = useQuery({
@@ -32,14 +36,10 @@ export default function Home() {
     enabled: !!user?.email && !isGuest,
   });
 
-  const approved = useMemo(
-    () => shops.filter((s) => s.approval_status !== 'rejected'),
-    [shops]
-  );
-
-  const filtered = activeCategory
-    ? approved.filter((s) => s.category === activeCategory)
-    : approved;
+  const filtered = useMemo(() => {
+    const list = merchants.filter((s) => s.approval_status !== 'rejected');
+    return activeCategory ? list.filter((s) => (s.category_id || s.category) === activeCategory) : list;
+  }, [merchants, activeCategory]);
 
   const byRating = [...filtered].sort((a, b) => (b.rating || 0) - (a.rating || 0));
   const featured = filtered.slice(0, 6);
@@ -53,10 +53,7 @@ export default function Home() {
   const recommended = byRating.slice(1, 7);
 
   const recentIds = getRecentlyViewedIds();
-  const recentlyViewed = recentIds
-    .map((id) => approved.find((s) => s.id === id))
-    .filter(Boolean)
-    .slice(0, 6);
+  const recentlyViewed = recentIds.map((id) => filtered.find((s) => s.id === id)).filter(Boolean).slice(0, 6);
 
   const reorderMerchants = useMemo(() => {
     const ids = [];
@@ -64,93 +61,65 @@ export default function Home() {
       const id = o.merchant_id || o.shop_id;
       if (id && !ids.includes(id)) ids.push(id);
     }
-    return ids.map((id) => approved.find((s) => s.id === id)).filter(Boolean).slice(0, 6);
-  }, [orders, approved]);
+    return ids.map((id) => filtered.find((s) => s.id === id)).filter(Boolean).slice(0, 6);
+  }, [orders, filtered]);
 
   const activeOrders = orders.filter((o) => isActiveOrderStatus(o.status)).slice(0, 2);
 
   return (
     <div className="pb-4 space-y-1">
-      <div className="px-4 pt-4">
+      <div className="px-4 pt-2">
         <p className="text-sm text-muted-foreground">{greeting}</p>
         <h1 className="text-xl font-bold text-foreground">
           {isGuest ? 'Welcome, guest' : user?.full_name?.split(' ')[0] || 'Welcome'}
         </h1>
       </div>
 
+      <div className="px-4 flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+        {sortOptions.map((opt) => (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => setSort(opt.id)}
+            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold border ${
+              sort === opt.id ? 'bg-primary text-primary-foreground border-primary' : 'bg-card border-border text-muted-foreground'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      <HeroBanner ads={SHOP_DEAL_ADS} />
+      <CategoryScroll active={activeCategory} onSelect={setActiveCategory} />
+
       {activeOrders.length > 0 && (
-        <div className="px-4 mt-3 space-y-2">
-          {activeOrders.map((o) => (
-            <Link
-              key={o.id}
-              to={`/order/${o.id}`}
-              className="block bg-primary/10 border border-primary/20 rounded-2xl px-4 py-3"
-            >
-              <p className="text-xs font-semibold text-primary">Active order</p>
-              <p className="text-sm font-bold text-foreground">
-                {o.merchant_name || o.shop_name}
-              </p>
-              <p className="text-[10px] text-muted-foreground capitalize">
-                {(o.status || '').replace(/_/g, ' ')}
-              </p>
-            </Link>
-          ))}
+        <div className="px-4 mt-4">
+          <h2 className="text-sm font-bold text-foreground mb-2">Active orders</h2>
+          <div className="space-y-2">
+            {activeOrders.map((o) => (
+              <Link key={o.id} to={`/order/${o.id}`} className="block bg-card border border-border rounded-2xl p-3">
+                <p className="font-semibold text-sm">{o.shop_name}</p>
+                <p className="text-xs text-muted-foreground capitalize">{o.status?.replace(/_/g, ' ')}</p>
+              </Link>
+            ))}
+          </div>
         </div>
       )}
 
-      <HeroBanner />
-      <CategoryScroll onCategorySelect={setActiveCategory} activeCategory={activeCategory} />
-
-      {/* Deals */}
-      <div className="px-4 mt-6">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-bold text-foreground">Deals</h2>
-          <Link to="/deals" className="text-xs font-semibold text-primary">
-            See all
-          </Link>
-        </div>
-        <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-          {MOCK_DEALS.map((d) => (
-            <Link
-              key={d.id}
-              to="/deals"
-              className="min-w-[200px] bg-card border border-border/50 rounded-2xl p-4 hover:bg-muted/30"
-            >
-              <span className="text-2xl">{d.emoji}</span>
-              <p className="font-semibold text-sm mt-2">{d.title}</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">{d.body}</p>
-              <span className="text-[10px] font-semibold text-primary mt-2 inline-block">{d.badge}</span>
-            </Link>
-          ))}
-        </div>
-      </div>
-
-      <MerchantRail title="Nearby" shops={nearby} isLoading={isLoading} />
-      <MerchantRail title="Featured" shops={featured} isLoading={isLoading} />
-      <MerchantRail title="Popular" shops={popular} isLoading={isLoading} />
-      <MerchantRail
-        title="Recommended"
-        shops={recommended}
-        isLoading={isLoading}
-        seeAllTo="/recommendations"
-      />
-      <MerchantRail
-        title="Recently viewed"
-        shops={recentlyViewed}
-        isLoading={false}
-        seeAllTo={null}
-        emptyLabel={recentlyViewed.length === 0 ? 'Merchants you open will show up here.' : undefined}
-      />
-      <MerchantRail
-        title="Reorder"
-        shops={reorderMerchants}
-        isLoading={false}
-        seeAllTo="/orders"
-        emptyLabel={!user ? 'Sign in to see past merchants.' : reorderMerchants.length === 0 ? 'Your past merchants appear here.' : undefined}
-      />
-      <MerchantRail title="Trending" shops={trending} isLoading={isLoading} />
-      <MerchantRail title="Top rated" shops={topRated} isLoading={isLoading} />
-      <MerchantRail title="New merchants" shops={newMerchants} isLoading={isLoading} />
+      <MerchantRail title="Nearby" shops={nearby} isLoading={isLoading} seeAllTo="/explore" />
+      <MerchantRail title="Featured" shops={featured} isLoading={isLoading} seeAllTo="/explore" />
+      <MerchantRail title="Top rated" shops={topRated} isLoading={isLoading} seeAllTo="/explore" />
+      <MerchantRail title="Popular" shops={popular} isLoading={isLoading} seeAllTo="/explore" />
+      {recentlyViewed.length > 0 && (
+        <MerchantRail title="Recently viewed" shops={recentlyViewed} isLoading={false} seeAllTo={null} />
+      )}
+      {reorderMerchants.length > 0 && (
+        <MerchantRail title="Order again" shops={reorderMerchants} isLoading={false} seeAllTo={null} />
+      )}
+      <MerchantRail title="New on DashZW" shops={newMerchants} isLoading={isLoading} seeAllTo="/explore" />
+      <MerchantRail title="Trending" shops={trending} isLoading={isLoading} seeAllTo="/explore" />
+      <MerchantRail title="Recommended" shops={recommended} isLoading={isLoading} seeAllTo="/explore" />
     </div>
   );
 }

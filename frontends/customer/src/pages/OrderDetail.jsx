@@ -7,7 +7,8 @@ import { ArrowLeft, CheckCircle2, Clock, Package, Truck, MapPin, Phone, X, Rotat
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import DeliveryMap from '@/components/map/DeliveryMap';
+import { locationApi } from '@/api/location';
+import PlatformMap from '@location/components/PlatformMap.jsx';
 import ReviewModal from '@/components/reviews/ReviewModal';
 import OrderChat from '@/components/chat/OrderChat';
 import { calcAccurateETA, getTrafficLabel } from '@/api';
@@ -89,6 +90,16 @@ export default function OrderDetail() {
       setShowReview(true);
     }
   }, [searchParams]);
+
+  const [tracking, setTracking] = useState(null);
+
+  useEffect(() => {
+    if (!orderId) return;
+    const load = () => locationApi.getOrderTracking(orderId).then(setTracking).catch(() => {});
+    load();
+    const t = setInterval(load, 4000);
+    return () => clearInterval(t);
+  }, [orderId]);
 
   const { data: order, isLoading } = useQuery({
     queryKey: ['order', orderId],
@@ -396,22 +407,27 @@ export default function OrderDetail() {
               </p>
             </div>
           )}
-          <DeliveryMap
-            shopAddress={order.shop_address || order.shop_name}
-            deliveryAddress={`${order.delivery_address}, ${order.delivery_city}`}
-            driverPosition={
-              order.driver_lat && order.driver_lng
-                ? [order.driver_lat, order.driver_lng]
-                : null
-            }
-            secondDelivery={siblingOrder ? {
-              address: `${siblingOrder.delivery_address}, ${siblingOrder.delivery_city}`,
-              label: siblingOrder.customer_name || 'Other customer',
-            } : null}
+          <PlatformMap
+            height={260}
+            merchant={order.shop_lat ? { lat: order.shop_lat, lng: order.shop_lng, label: order.shop_name } : null}
+            customer={order.dest_lat ? { lat: order.dest_lat, lng: order.dest_lng, label: order.delivery_address } : null}
+            driver={order.driver_lat ? { lat: order.driver_lat, lng: order.driver_lng, label: order.driver_name || 'Driver' } : null}
+            route={tracking?.routes?.[0]?.polyline || []}
           />
-          <p className="text-xs text-muted-foreground text-center mt-2">
-            {order.driver_lat ? '🛵 Driver location updating live' : '⏳ Waiting for driver location…'}
-          </p>
+          <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
+            <span>{order.driver_lat ? '🛵 Driver location updating live' : '⏳ Waiting for driver location…'}</span>
+            {tracking?.eta_mins != null && <span>ETA ~{tracking.eta_mins} min</span>}
+          </div>
+          {order.driver_phone && (
+            <div className="flex gap-2 mt-2">
+              <Button variant="outline" size="sm" className="rounded-xl flex-1" asChild>
+                <a href={`tel:${order.driver_phone}`}><Phone className="w-3.5 h-3.5 mr-1" /> Call driver</a>
+              </Button>
+              <Button variant="outline" size="sm" className="rounded-xl flex-1" onClick={() => setShowChat(true)}>
+                <MessageCircle className="w-3.5 h-3.5 mr-1" /> Chat (placeholder)
+              </Button>
+            </div>
+          )}
         </div>
       )}
 

@@ -1,12 +1,21 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { base44, cacheUser, getToken, setToken, preloadCollections } from '@/api';
+import { markSplashPending } from '@shared/hooks/useAppSplash';
 
 const AuthContext = createContext();
 const REQUIRED_ROLE = 'driver';
 
-async function safePreload(keys) {
+const PRELOAD_CRITICAL = ['Wallet', 'Notification', 'DriverProfile'];
+const PRELOAD_BACKGROUND = ['Order', 'Transaction'];
+
+function warmCaches() {
+  void safePreload(PRELOAD_CRITICAL, 50);
+  void safePreload(PRELOAD_BACKGROUND, 40);
+}
+
+async function safePreload(keys, limit) {
   try {
-    await preloadCollections(keys);
+    await preloadCollections(keys, limit);
   } catch (e) {
     console.warn('[DashZW] preload failed', e);
   }
@@ -34,7 +43,7 @@ export const AuthProvider = ({ children }) => {
         cacheUser(u);
         setUser(u);
         setIsAuth(true);
-        await safePreload(['Order', 'Wallet', 'Transaction', 'Notification', 'DriverProfile']);
+        warmCaches();
       } catch {
         setToken(null);
         cacheUser(null);
@@ -53,7 +62,8 @@ export const AuthProvider = ({ children }) => {
     cacheUser(u);
     setUser(u);
     setIsAuth(true);
-    await safePreload(['Order', 'Wallet', 'Transaction', 'Notification', 'DriverProfile']);
+    markSplashPending('driver');
+    warmCaches();
     return u;
   };
 

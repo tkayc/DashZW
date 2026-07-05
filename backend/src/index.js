@@ -14,6 +14,7 @@ import domainRoutes from './routes/domain.js';
 import chatRoutes from './routes/chat.js';
 import profileRoutes from './routes/profile.js';
 import uploadRoutes from './routes/uploads.js';
+import locationRoutes from './routes/location.js';
 import { UPLOADS_ROOT } from './services/storage/storage.js';
 import { seedDatabase } from './services/merchant/seedData.js';
 import { runOrderTimeoutCheck } from './services/orders/orderEngine.js';
@@ -78,6 +79,7 @@ function mountApi(routerBase) {
   app.use(`${routerBase}/chat`, chatRoutes);
   app.use(`${routerBase}/profile`, profileRoutes);
   app.use(`${routerBase}/uploads`, uploadRoutes);
+  app.use(`${routerBase}/location`, locationRoutes);
 }
 
 mountApi('/api');

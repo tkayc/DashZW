@@ -26,6 +26,18 @@ function makeId(email) {
   return 'usr_' + email.replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 10) + '_' + Date.now().toString(36).slice(-4);
 }
 
+export function normalizePhone(phone) {
+  return String(phone || '').replace(/\D/g, '');
+}
+
+function accountExistsError(field, message, existingEmail) {
+  const err = new Error(message);
+  err.code = 'ACCOUNT_EXISTS';
+  err.field = field;
+  err.existingEmail = existingEmail;
+  return err;
+}
+
 function mapPgUser(row) {
   if (!row) return null;
   return {
@@ -113,41 +125,133 @@ export async function findUserByEmail(email) {
   return getUsersStoreJson().find((u) => u.email.toLowerCase() === email.toLowerCase()) || null;
 }
 
-export async function registerUser({ email, password, full_name, role, phone }) {
-  const em = email.toLowerCase().trim();
+export async function findUserByPhone(phone) {
+  const digits = normalizePhone(phone);
+  if (!digits || digits.length < 9) return null;
 
   if (isPostgresEnabled()) {
-    const existing = await query('SELECT id FROM users WHERE email = $1', [em]);
-    if (existing.rows.length) throw new Error('An account with this email already exists');
+    const r = await query(
+      `SELECT id, email, full_name, role, staff_role, phone, created_at
+       FROM users
+       WHERE regexp_replace(coalesce(phone, ''), '\\D', '', 'g') = $1
+       LIMIT 1`,
+      [digits]
+    );
+    return mapPgUser(r.rows[0]);
+  }
 
-    const staffRole = role === 'partner' ? defaultStaffRoleForPartnerUser() : null;
+  return (
+    getUsersStoreJson().find((u) => normalizePhone(u.phone) === digits) || null
+  );
+}
+
+export async function checkAccountAvailability({ email, phone }) {
+  const em = email?.toLowerCase().trim();
+  if (em) {
+    const byEmail = await findUserByEmail(em);
+    if (byEmail) {
+      return {
+        available: false,
+        field: 'email',
+        message: 'An account with this email already exists.',
+        existingEmail: byEmail.email,
+      };
+    }
+  }
+
+  const digits = normalizePhone(phone);
+  if (digits.length >= 9) {
+    const byPhone = await findUserByPhone(digits);
+    if (byPhone) {
+      return {
+        available: false,
+        field: 'phone',
+        message: 'An account with this phone number already exists.',
+        existingEmail: byPhone.email,
+      };
+    }
+  }
+
+  return { available: true };
+}
+
+export async function registerUser({ email, password, full_name, role, phone }) {
+  const em = email.toLowerCase().trim();
+  const resolvedRole = role || 'customer';
+
+  const existingEmail = await findUserByEmail(em);
+  if (existingEmail) {
+    throw accountExistsError(
+      'email',
+      'An account with this email already exists. Sign in or reset your password.',
+      existingEmail.email
+    );
+  }
+
+  const phoneDigits = normalizePhone(phone);
+  if (phoneDigits.length >= 9) {
+    const existingPhone = await findUserByPhone(phone);
+    if (existingPhone) {
+      throw accountExistsError(
+        'phone',
+        'An account with this phone number already exists. Sign in or reset your password.',
+        existingPhone.email
+      );
+    }
+  }
+
+  if (isPostgresEnabled()) {
+    const staffRole = resolvedRole === 'partner' ? defaultStaffRoleForPartnerUser() : null;
     const r = await query(
       `INSERT INTO users (email, password_hash, full_name, role, staff_role, phone, email_verified)
        VALUES ($1, crypt($2, gen_salt('bf')), $3, $4, $5, $6, FALSE)
        RETURNING id, email, full_name, role, staff_role, phone, created_at`,
-      [em, password, full_name.trim(), role || 'customer', staffRole, phone || null]
+      [em, password, full_name.trim(), resolvedRole, staffRole, phone || null]
     );
     return mapPgUser(r.rows[0]);
   }
 
   const users = getUsersStoreJson();
-  if (users.find((u) => u.email.toLowerCase() === em)) {
-    throw new Error('An account with this email already exists');
-  }
   const newUser = {
     id: makeId(em),
     email: em,
     password,
     full_name: full_name.trim(),
-    role,
+    role: resolvedRole,
     phone: phone || '',
-    staff_role: role === 'partner' ? defaultStaffRoleForPartnerUser() : undefined,
-    approval_status: role === 'partner' ? 'pending' : 'approved',
+    staff_role: resolvedRole === 'partner' ? defaultStaffRoleForPartnerUser() : undefined,
+    approval_status: resolvedRole === 'partner' ? 'pending' : 'approved',
     created_date: new Date().toISOString(),
   };
   users.push(newUser);
   saveUsersFile(users);
   return sanitizeUser(newUser);
+}
+
+export async function resetPassword(email, newPassword) {
+  const em = email?.toLowerCase().trim();
+  if (!em || !newPassword || newPassword.length < 6) {
+    throw new Error('Valid email and password (min 6 characters) are required');
+  }
+
+  if (isPostgresEnabled()) {
+    const r = await query(
+      `UPDATE users
+       SET password_hash = crypt($2, gen_salt('bf')), updated_at = NOW()
+       WHERE email = $1 AND is_active = TRUE
+       RETURNING email`,
+      [em, newPassword]
+    );
+    if (!r.rows[0]) throw new Error('No account found for this email');
+    return { ok: true, email: r.rows[0].email };
+  }
+
+  const users = getUsersStoreJson();
+  const idx = users.findIndex((u) => u.email.toLowerCase() === em);
+  if (idx < 0) throw new Error('No account found for this email');
+  users[idx].password = newPassword;
+  saveUsersFile(users);
+  return { ok: true, email: users[idx].email };
 }
 
 export async function updateUser(email, data) {

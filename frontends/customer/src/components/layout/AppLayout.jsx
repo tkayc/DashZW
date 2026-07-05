@@ -1,10 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Outlet, Link } from 'react-router-dom';
+import { Outlet, Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import BottomNav from './BottomNav';
 import FloatingCartBar from './FloatingCartBar';
 import NotificationBell from '@/components/shared/NotificationBell';
 import { UtensilsCrossed, ChevronDown, MapPin, Search, X, Check } from 'lucide-react';
+import { delivery as deliveryIcon } from '@assets/icons/index.js';
+import DeliveryAddressBar from '@/components/location/DeliveryAddressBar';
 import { useCart } from '@/lib/CartContext';
+import { Input } from '@/components/ui/input';
 
 // ── Delivery Mode Popup ───────────────────────────────────────────────────────
 function DeliveryModePopup({ mode, onSelect, address, onAddressChange, onClose }) {
@@ -19,7 +22,8 @@ function DeliveryModePopup({ mode, onSelect, address, onAddressChange, onClose }
   const options = [
     {
       id: 'delivery',
-      icon: '🛵',
+      icon: deliveryIcon,
+      iconImg: true,
       label: 'Delivery',
       desc: 'Get it delivered to your address',
     },
@@ -50,7 +54,11 @@ function DeliveryModePopup({ mode, onSelect, address, onAddressChange, onClose }
                   ? 'border-primary bg-primary/5'
                   : 'border-border hover:bg-muted/60'
               }`}>
-              <span className="text-2xl">{opt.icon}</span>
+              {opt.iconImg ? (
+                <img src={opt.icon} alt="" className="w-9 h-9 object-contain shrink-0" />
+              ) : (
+                <span className="text-2xl">{opt.icon}</span>
+              )}
               <div className="flex-1">
                 <p className={`font-semibold text-sm ${mode === opt.id ? 'text-primary' : 'text-foreground'}`}>
                   {opt.label}
@@ -97,6 +105,35 @@ function DeliveryModePopup({ mode, onSelect, address, onAddressChange, onClose }
 export default function AppLayout() {
   const { deliveryMode, setDeliveryMode, deliveryAddress, setDeliveryAddress, itemCount } = useCart();
   const [showModePopup, setShowModePopup] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const searchInputRef = useRef(null);
+  const isSearchPage = location.pathname === '/search';
+  const urlQuery = searchParams.get('q') || '';
+  const [searchDraft, setSearchDraft] = useState(urlQuery);
+
+  useEffect(() => {
+    setSearchDraft(isSearchPage ? urlQuery : '');
+  }, [isSearchPage, urlQuery]);
+
+  const handleSearchChange = (e) => {
+    const value = e.target.value;
+    setSearchDraft(value);
+    const params = new URLSearchParams();
+    if (value.trim()) params.set('q', value);
+    navigate(`/search${params.toString() ? `?${params.toString()}` : ''}`, { replace: isSearchPage });
+  };
+
+  const handleSearchFocus = () => {
+    if (!isSearchPage) navigate('/search');
+  };
+
+  const clearSearch = () => {
+    setSearchDraft('');
+    navigate('/search', { replace: true });
+    searchInputRef.current?.focus();
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -115,21 +152,39 @@ export default function AppLayout() {
             <NotificationBell />
           </div>
 
-          {/* Single search bar + delivery mode (address is not a second search field) */}
-          <div className="flex items-center gap-2 pb-3">
-            <Link
-              to="/search"
-              className="flex-1 flex items-center gap-2 bg-muted/70 rounded-2xl px-3 py-2.5 min-w-0 hover:bg-muted transition-colors"
-            >
-              <Search className="w-4 h-4 text-muted-foreground shrink-0" />
-              <span className="text-sm text-muted-foreground truncate">Search merchants & products</span>
-            </Link>
+          <DeliveryAddressBar onClick={() => setShowModePopup(true)} />
+
+          {/* Single search bar + delivery mode */}
+          <div className="flex items-center gap-2 pb-2.5">
+            <div className="relative flex-1 min-w-0">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+              <Input
+                ref={searchInputRef}
+                type="search"
+                value={searchDraft}
+                onChange={handleSearchChange}
+                onFocus={handleSearchFocus}
+                placeholder="Search merchants & products"
+                className="pl-9 pr-9 rounded-2xl bg-muted/70 border-0 h-10 text-sm"
+              />
+              {searchDraft && (
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full hover:bg-muted flex items-center justify-center"
+                  aria-label="Clear search"
+                >
+                  <X className="w-3.5 h-3.5 text-muted-foreground" />
+                </button>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => setShowModePopup(true)}
-              className="flex items-center gap-1 bg-primary text-primary-foreground rounded-2xl px-3 py-2.5 text-xs font-semibold shrink-0 hover:bg-primary/90 transition-colors whitespace-nowrap"
+              className="flex items-center gap-1.5 bg-primary text-primary-foreground rounded-2xl px-3 py-2.5 text-xs font-semibold shrink-0 hover:bg-primary/90 transition-colors whitespace-nowrap"
               title={deliveryAddress || 'Delivery address'}
             >
+              <img src={deliveryIcon} alt="" className="w-4 h-4 object-contain" />
               <span>{deliveryMode === 'pickup' ? 'Pickup' : 'Delivery'}</span>
               <ChevronDown className="w-3.5 h-3.5" />
             </button>

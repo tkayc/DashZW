@@ -3,21 +3,22 @@ import { Link } from 'react-router-dom';
 import { Star, Clock, Bike } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { getShopStatus } from '@/api';
+import { formatUSD } from '@/lib/formatCurrency';
 
 export default function ShopCard({ shop, variant = 'default' }) {
   const isWide = variant === 'wide';
   const { isOpen, closingSoon, minutesUntilClose } = getShopStatus(shop);
 
   return (
-    <Link to={`/shop/${shop.id}`} className={`block group ${isWide ? 'min-w-[280px]' : ''}`}>
-      <div className="bg-card rounded-2xl overflow-hidden shadow-sm hover:shadow-lg transition-all duration-300 border border-border/50">
+    <Link to={`/shop/${shop.id}`} className="block group w-full">
+      <div className="bg-card rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300 border border-border/50">
 
         {/* Image — blurred when closed, no overlays on top of image */}
         <div className="relative h-36 overflow-hidden">
           <img
             src={shop.image_url || 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=600&q=80'}
             alt={shop.name}
-            className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ${!isOpen ? 'blur-[2px]' : ''}`}
+            className={`w-full h-full object-cover transition-transform duration-500 ${!isOpen ? 'blur-[2px]' : 'group-hover:scale-[1.03]'}`}
           />
           {/* CLOSED text centred over the blur — no opening time here */}
           {!isOpen && (
@@ -50,8 +51,13 @@ export default function ShopCard({ shop, variant = 'default' }) {
                 </div>
                 <div className="flex items-center gap-1 text-muted-foreground">
                   <Bike className="w-3 h-3" />
-                  <span className="text-xs">From R1.00</span>
+                  <span className="text-xs">
+                    {shop.delivery_fee != null ? formatUSD(shop.delivery_fee) : 'Fee at checkout'}
+                  </span>
                 </div>
+                {shop.distance_km != null && (
+                  <span className="text-xs text-muted-foreground">{shop.distance_km.toFixed(1)} km</span>
+                )}
                 {shop.category === 'grocery' && (
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-5">Free delivery promos</Badge>
                 )}

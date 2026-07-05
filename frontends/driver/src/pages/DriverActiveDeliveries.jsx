@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { formatUSD } from '@/lib/formatCurrency';
 import { format } from 'date-fns';
-import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
 import DeliveryMap from '@/components/map/DeliveryMap';
 import { useDriverLocation } from '@/hooks/useDriverLocation';
 import { settleOrder } from '@/api';
@@ -36,6 +36,7 @@ const PAYMENT_LABELS = {
 };
 
 function ActiveDeliveryCard({ order, onUpdateStatus }) {
+  const navigate = useNavigate();
   const [showMap, setShowMap] = useState(false);
   const [showCodeEntry, setShowCodeEntry] = useState(false);
   const [codeInput, setCodeInput] = useState('');
@@ -121,7 +122,7 @@ function ActiveDeliveryCard({ order, onUpdateStatus }) {
           </button>
           <button
             type="button"
-            onClick={() => toast.message('Turn-by-turn navigation coming soon')}
+            onClick={() => navigate(`/navigate/${order.id}`)}
             className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium"
           >
             <Navigation className="w-3.5 h-3.5" /> Navigate

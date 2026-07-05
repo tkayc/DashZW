@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { authMiddleware } from '../services/authentication/middleware.js';
 import { localDb } from '../db/localDb.js';
 import { getPolicy } from './entityPolicy.js';
+import { notifyOrderStatusChanged } from '../services/notifications/notifications.js';
+import { normalizeOrderStatus } from '../domain/orderStates.js';
 
 const COLLECTIONS = Object.keys(localDb.entities);
 const router = Router();
@@ -154,6 +156,31 @@ async function canCreateInCollection(user, collection, body) {
 }
 
 async function filterVisible(user, collection, rows) {
+  const policy = getPolicy(collection);
+  if (isAdmin(user) || policy.publicRead) return rows;
+
+  const email = userEmail(user);
+
+  // Fast path: customer-owned rows (e.g. Order.customer_email)
+  if (
+    policy.ownerField &&
+    (policy.allowOwnerRW || policy.allowOwnerRead) &&
+    normalizeRole(user?.role) === 'customer'
+  ) {
+    return rows.filter(
+      (r) => (r[policy.ownerField] || '').toLowerCase() === email
+    );
+  }
+
+  // Fast path: driver order visibility
+  if (isDriver(user) && collection === 'Order') {
+    return rows.filter((r) => {
+      const de = (r.driver_email || '').toLowerCase();
+      if (de && de === email) return true;
+      return !r.driver_email && ['ready_for_pickup', 'pending_acceptance'].includes(r.status);
+    });
+  }
+
   const out = [];
   for (const r of rows) {
     if (await canReadRecord(user, collection, r)) out.push(r);
@@ -275,6 +302,15 @@ router.patch('/:collection/:id', async (req, res) => {
   }
 
   const item = await localDb.entities[collection].update(id, body);
+
+  if (collection === 'Order' && body.status) {
+    const prev = normalizeOrderStatus(existing.status);
+    const next = normalizeOrderStatus(body.status);
+    if (prev !== next) {
+      void notifyOrderStatusChanged(item, body.status);
+    }
+  }
+
   res.json(item);
 });
 

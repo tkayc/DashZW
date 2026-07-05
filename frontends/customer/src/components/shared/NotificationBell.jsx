@@ -80,13 +80,15 @@ export default function NotificationBell() {
   }, []);
 
   const handleOpen = async () => {
-    setOpen((v) => !v);
-    if (!open && user?.email) {
+    const willOpen = !open;
+    setOpen(willOpen);
+    if (willOpen && user?.email && !isGuest) {
       try {
         await markAllRead(user.email);
         if (user.role === 'driver') await markAllRead('__drivers__');
       } catch {}
       setUnread(0);
+      refresh();
     }
   };
 

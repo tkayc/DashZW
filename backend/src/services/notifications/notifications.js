@@ -1,70 +1,71 @@
 /**
  * notifications.js — DashZW in-app notification system
  *
- * Notifications are stored in localStorage under dashzw_Notification.
- * BroadcastChannel ensures cross-tab delivery instantly.
- *
- * Each notification:
- *  { id, recipient_email, title, body, type, link, is_read, created_date }
- *
- * Types: order_placed | order_confirmed | order_preparing | order_ready |
- *        order_picked_up | order_delivered | order_cancelled |
- *        item_unavailable | wallet_credited | driver_blocked |
- *        new_order (partner) | job_available (driver) | shop_approved
+ * Persisted via localDb.entities.Notification (PostgreSQL or JSON files).
+ * SSE invalidation via notifyListeners('Notification').
  */
 
-import { getCollection, saveCollection, subscribeToDbChanges } from '../../db/localDb.js';
+import { localDb } from '../../db/localDb.js';
+import { notifyListeners } from '../../db/store.js';
+import { isPostgresEnabled, query } from '../../db/pg.js';
+import { categoryForNotificationType } from '../../domain/notificationArchitecture.js';
 import { ORDER_STATUS, normalizeOrderStatus } from '../../domain/orderStates.js';
 
-const NOTIF_KEY = 'Notification';
+const Notification = () => localDb.entities.Notification;
 
-function genId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+function emailMatches(a, b) {
+  return String(a || '').toLowerCase() === String(b || '').toLowerCase();
 }
 
-export function createNotification({ recipient_email, title, body, type, link = null }) {
+export async function createNotification({ recipient_email, title, body, type, link = null }) {
   if (!recipient_email) return;
-  const notifs = getCollection(NOTIF_KEY);
-  notifs.push({
-    id: genId(),
+  await Notification().create({
     recipient_email,
     title,
     body,
     type,
     link,
+    category: categoryForNotificationType(type),
+    channel: 'in_app',
     is_read: false,
-    created_date: new Date().toISOString(),
   });
-  saveCollection(NOTIF_KEY, notifs);
 }
 
-export function getNotifications(email) {
-  return getCollection(NOTIF_KEY)
-    .filter(n => n.recipient_email === email)
-    .sort((a, b) => new Date(b.created_date) - new Date(a.created_date))
-    .slice(0, 50);
+export async function getNotifications(email) {
+  if (!email) return [];
+  const rows = await Notification().filter({ recipient_email: email }, '-created_date', 50);
+  return rows.filter((n) => emailMatches(n.recipient_email, email));
 }
 
-export function getUnreadCount(email) {
-  return getCollection(NOTIF_KEY).filter(n => n.recipient_email === email && !n.is_read).length;
+export async function getUnreadCount(email) {
+  const rows = await getNotifications(email);
+  return rows.filter((n) => !n.is_read).length;
 }
 
-export function markAllRead(email) {
-  const notifs = getCollection(NOTIF_KEY).map(n =>
-    n.recipient_email === email ? { ...n, is_read: true } : n
+export async function markAllRead(email) {
+  if (!email) return;
+  if (isPostgresEnabled()) {
+    await query(
+      `UPDATE notifications SET is_read = TRUE WHERE LOWER(recipient_email::text) = LOWER($1)`,
+      [email]
+    );
+    notifyListeners('Notification');
+    return;
+  }
+  const rows = await Notification().filter({ recipient_email: email }, '-created_date', 500);
+  await Promise.all(
+    rows.filter((n) => !n.is_read).map((n) => Notification().update(n.id, { is_read: true }))
   );
-  saveCollection(NOTIF_KEY, notifs);
 }
 
-export function markRead(id) {
-  const notifs = getCollection(NOTIF_KEY).map(n =>
-    n.id === id ? { ...n, is_read: true } : n
-  );
-  saveCollection(NOTIF_KEY, notifs);
+export async function markRead(id) {
+  await Notification().update(id, { is_read: true });
+  if (isPostgresEnabled()) notifyListeners('Notification');
 }
 
-export function deleteNotification(id) {
-  saveCollection(NOTIF_KEY, getCollection(NOTIF_KEY).filter(n => n.id !== id));
+export async function deleteNotification(id) {
+  await Notification().delete(id);
+  if (isPostgresEnabled()) notifyListeners('Notification');
 }
 
 // ── Order lifecycle notifications ─────────────────────────────────────────────
@@ -73,9 +74,9 @@ function merchantDisplayName(order) {
   return order.merchant_name || order.shop_name || 'the merchant';
 }
 
-export function notifyOrderPlaced(order) {
+export async function notifyOrderPlaced(order) {
   const name = merchantDisplayName(order);
-  createNotification({
+  await createNotification({
     recipient_email: order.customer_email,
     title: '✅ Order Placed!',
     body: `Your order from ${name} has been received. Total: ${order.total?.toFixed(2)}`,
@@ -83,7 +84,7 @@ export function notifyOrderPlaced(order) {
     link: `/order/${order.id}`,
   });
   if (order.partner_email) {
-    createNotification({
+    await createNotification({
       recipient_email: order.partner_email,
       title: '🛎️ New Order!',
       body: `New order from ${order.customer_name || 'a customer'} — ${order.partner_payout?.toFixed(2)} • ${order.payment_method?.replace(/_/g, ' ')}`,
@@ -93,7 +94,7 @@ export function notifyOrderPlaced(order) {
   }
 }
 
-export function notifyOrderStatusChanged(order, newStatus) {
+export async function notifyOrderStatusChanged(order, newStatus) {
   const status = normalizeOrderStatus(newStatus);
   const name = merchantDisplayName(order);
 
@@ -138,7 +139,6 @@ export function notifyOrderStatusChanged(order, newStatus) {
       title: '💸 Order Refunded',
       body: `Your order from ${name} has been refunded.`,
     },
-    // Legacy keys still accepted from older clients
     confirmed: {
       title: '👍 Order Accepted',
       body: `${name} accepted your order and will start preparing it soon.`,
@@ -151,7 +151,7 @@ export function notifyOrderStatusChanged(order, newStatus) {
 
   const msg = statusMessages[status] || statusMessages[newStatus];
   if (msg && order.customer_email) {
-    createNotification({
+    await createNotification({
       recipient_email: order.customer_email,
       title: msg.title,
       body: msg.body,
@@ -161,7 +161,7 @@ export function notifyOrderStatusChanged(order, newStatus) {
   }
 
   if (status === ORDER_STATUS.READY_FOR_PICKUP) {
-    createNotification({
+    await createNotification({
       recipient_email: '__drivers__',
       title: '🚀 New Job Available!',
       body: `Order from ${name} is ready for pickup — earn ${order.driver_earning?.toFixed(2)}`,
@@ -183,7 +183,7 @@ export function notifyOrderStatusChanged(order, newStatus) {
       [ORDER_STATUS.DELIVERED]: '✅ Order Delivered',
       [ORDER_STATUS.COMPLETED]: '✅ Order Completed',
     };
-    createNotification({
+    await createNotification({
       recipient_email: order.partner_email,
       title: titles[status] || 'Order Update',
       body:
@@ -196,8 +196,8 @@ export function notifyOrderStatusChanged(order, newStatus) {
   }
 }
 
-export function notifyItemUnavailable(order, itemName, isCash) {
-  createNotification({
+export async function notifyItemUnavailable(order, itemName, isCash) {
+  await createNotification({
     recipient_email: order.customer_email,
     title: '⚠️ Item Unavailable',
     body: isCash
@@ -208,8 +208,8 @@ export function notifyItemUnavailable(order, itemName, isCash) {
   });
 }
 
-export function notifyReplacementNeeded(order, itemName) {
-  createNotification({
+export async function notifyReplacementNeeded(order, itemName) {
+  await createNotification({
     recipient_email: order.customer_email,
     title: '🛒 Choose a replacement',
     body: `"${itemName}" is out of stock. Pick a replacement or remove it from your order.`,
@@ -218,9 +218,9 @@ export function notifyReplacementNeeded(order, itemName) {
   });
 }
 
-export function notifyReplacementResolved(order, itemName, actionLabel) {
+export async function notifyReplacementResolved(order, itemName, actionLabel) {
   if (!order.partner_email) return;
-  createNotification({
+  await createNotification({
     recipient_email: order.partner_email,
     title: '✅ Customer updated item',
     body: `${order.customer_name || 'Customer'} chose: ${actionLabel} for "${itemName}".`,
@@ -229,8 +229,8 @@ export function notifyReplacementResolved(order, itemName, actionLabel) {
   });
 }
 
-export function notifyWalletCredited(email, amount, reason) {
-  createNotification({
+export async function notifyWalletCredited(email, amount, reason) {
+  await createNotification({
     recipient_email: email,
     title: `💰 Wallet Credited +${amount.toFixed(2)}`,
     body: reason,
@@ -239,8 +239,8 @@ export function notifyWalletCredited(email, amount, reason) {
   });
 }
 
-export function notifyDriverBlocked(driverEmail) {
-  createNotification({
+export async function notifyDriverBlocked(driverEmail) {
+  await createNotification({
     recipient_email: driverEmail,
     title: '🔴 Account Blocked',
     body: 'Top up your wallet to continue accepting COD orders. Visit a partner shop with your Driver ID to top up.',
@@ -249,8 +249,8 @@ export function notifyDriverBlocked(driverEmail) {
   });
 }
 
-export function notifyShopApproved(ownerEmail, shopName) {
-  createNotification({
+export async function notifyShopApproved(ownerEmail, shopName) {
+  await createNotification({
     recipient_email: ownerEmail,
     title: '🎉 Shop Approved!',
     body: `"${shopName}" has been approved and is now live on DashZW.`,

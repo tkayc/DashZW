@@ -13,6 +13,8 @@ import { useCart } from '@/lib/CartContext';
 import ScheduledDelivery from '@/components/checkout/ScheduledDelivery';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
+import { useDeliveryLocation } from '@/lib/LocationContext';
+import { locationApi } from '@/api/location';
 import { calcDistanceFromShop, getBrowserLocation } from '@/api';
 import { calcDeliveryFee, buildPricing, calcServiceFee, getBalance, placeOrder } from '@/api';
 import { calcSurgeMultiplier } from '@/api';
@@ -38,6 +40,7 @@ function calcShopCouponDiscount(promo, subtotal) {
 export default function Checkout() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { delivery, selectAddress } = useDeliveryLocation();
   const {
     items, shopId, shopName, clearCart, deliveryMode, deliveryAddress: savedAddress,
     deliveryInstructions, setDeliveryInstructions, driverTip, setDriverTip,
@@ -49,8 +52,8 @@ export default function Checkout() {
   useEffect(() => {
     if (user?.email) getProfile(user.email).then(setProfile).catch(() => setProfile({}));
   }, [user?.email]);
-  const [address, setAddress]   = useState(savedAddress || profile.address || '');
-  const [phone, setPhone]       = useState(profile.phone || '');
+  const [address, setAddress]   = useState(savedAddress || delivery?.formatted_address || profile.address || '');
+  const [phone, setPhone]       = useState(profile.phone || delivery?.phone_number || '');
   const [scheduledTime, setScheduledTime] = useState(null);
   const [paymentMethod, setPayment] = useState('ecocash');
   const [useWalletPayment, setUseWalletPayment] = useState(useWalletPreview !== false);
@@ -59,18 +62,27 @@ export default function Checkout() {
   const [shop, setShop]             = useState(null);
   const [distanceKm, setDistanceKm] = useState(null);
   const [calcingDist, setCalcingDist] = useState(false);
-  const [gpsCoords, setGpsCoords]   = useState(null); // { lat, lng } from browser GPS
+  const [gpsCoords, setGpsCoords]   = useState(
+    delivery?.lat != null ? { lat: delivery.lat, lng: delivery.lng } : null
+  );
   const [distError, setDistError]   = useState('');
+  const [savedAddresses, setSavedAddresses] = useState([]);
+  const [recipientName, setRecipientName] = useState(delivery?.recipient_name || '');
+  const [addressMode, setAddressMode] = useState('current'); // current | new | saved
 
-  const [couponInput, setCouponInput]           = useState(cartCoupon || cartVoucher || '');
-  const [appliedPromo, setAppliedPromo]         = useState(null);
-  const [appliedAdminPromo, setAppliedAdminPromo] = useState(null);
-  const [couponChecking, setCouponChecking]     = useState(false);
-  const [couponError, setCouponError]           = useState('');
-  const [savedAddresses] = useState([
-    { id: 'home', label: 'Home', line: '' },
-    { id: 'work', label: 'Work', line: '' },
-  ]);
+  useEffect(() => {
+    if (delivery?.lat != null) {
+      setGpsCoords({ lat: delivery.lat, lng: delivery.lng });
+      if (addressMode === 'current') {
+        setAddress(delivery.formatted_address || delivery.street_address || address);
+      }
+    }
+  }, [delivery?.lat, delivery?.lng]);
+
+  useEffect(() => {
+    if (!user?.email) return;
+    locationApi.listAddresses().then(setSavedAddresses).catch(() => setSavedAddresses([]));
+  }, [user?.email]);
 
   const isPickup = deliveryMode === 'pickup';
 
@@ -107,11 +119,23 @@ export default function Checkout() {
     const shopCoords = (shop.lat && shop.lng) ? { lat: shop.lat, lng: shop.lng } : null;
     if (!shopCoords) { setDistError('Shop location not available'); return; }
 
-    // If GPS coords available, use them immediately
+    // Use stored coordinates when available (GPS or saved address)
     if (gpsCoords) {
-      const km = calcDistanceSync(shopCoords, gpsCoords);
-      setDistanceKm(km);
-      setDistError('');
+      locationApi.getMerchantQuote(shopId, gpsCoords.lat, gpsCoords.lng)
+        .then((q) => {
+          if (q?.distance_km != null) {
+            setDistanceKm(q.distance_km);
+            setDistError(q.deliverable === false ? 'Outside merchant delivery radius' : '');
+          } else {
+            const km = calcDistanceSync(shopCoords, gpsCoords);
+            setDistanceKm(km);
+            setDistError('');
+          }
+        })
+        .catch(() => {
+          const km = calcDistanceSync(shopCoords, gpsCoords);
+          setDistanceKm(km);
+        });
       return;
     }
 
@@ -317,11 +341,11 @@ export default function Checkout() {
             ? parseFloat(Math.max(0, (rawDeliveryFee || 0) - serviceOnRaw).toFixed(2))
             : pricing.driverEarning,
         distance_km:       distanceKm,
-        delivery_address:  isPickup ? '' : (gpsCoords ? 'GPS Location' : address),
-        delivery_city:     'Johannesburg',
+        delivery_address:  isPickup ? '' : address,
+        delivery_city:     delivery?.city || 'Johannesburg',
         dest_lat:          gpsCoords?.lat || null,
         dest_lng:          gpsCoords?.lng || null,
-        delivery_notes:    [deliveryInstructions, specialNotes].filter(Boolean).join(' | '),
+        delivery_notes:    [deliveryInstructions, specialNotes, recipientName ? `Recipient: ${recipientName}` : ''].filter(Boolean).join(' | '),
         delivery_instructions: deliveryInstructions,
         special_notes:     specialNotes,
         driver_tip:        tipAmount,

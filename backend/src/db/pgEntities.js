@@ -352,7 +352,11 @@ async function loadOrderItems(orderId) {
     `SELECT * FROM order_items WHERE order_id = $1 ORDER BY id`,
     [orderId]
   );
-  return r.rows.map((i) => ({
+  return mapOrderItemRows(r.rows);
+}
+
+function mapOrderItemRows(rows) {
+  return rows.map((i) => ({
     menu_item_id: i.menu_item_id || i.product_id,
     product_id: i.product_id,
     name: i.name,
@@ -371,6 +375,20 @@ async function loadOrderItems(orderId) {
   }));
 }
 
+async function loadOrderItemsBatch(orderIds) {
+  if (!orderIds.length) return new Map();
+  const r = await query(
+    `SELECT * FROM order_items WHERE order_id = ANY($1::text[]) ORDER BY order_id, id`,
+    [orderIds]
+  );
+  const map = new Map();
+  for (const row of r.rows) {
+    if (!map.has(row.order_id)) map.set(row.order_id, []);
+    map.get(row.order_id).push(mapOrderItemRows([row])[0]);
+  }
+  return map;
+}
+
 async function fetchAll(collection, sortKey, limit) {
   const meta = TABLE_MAP[collection];
   if (!meta) return [];
@@ -382,11 +400,10 @@ async function fetchAll(collection, sortKey, limit) {
       `SELECT * FROM orders ORDER BY ${orderCol} DESC NULLS LAST LIMIT $1`,
       [limit]
     );
-    const rows = [];
-    for (const row of r.rows) {
-      const items = await loadOrderItems(row.id);
-      rows.push(orderToApi({ ...row, items_json: items }));
-    }
+    const itemsByOrder = await loadOrderItemsBatch(r.rows.map((row) => row.id));
+    const rows = r.rows.map((row) =>
+      orderToApi({ ...row, items_json: itemsByOrder.get(row.id) || [] })
+    );
     return applySort(rows, sortKey).slice(0, limit);
   }
 
@@ -394,16 +411,16 @@ async function fetchAll(collection, sortKey, limit) {
     `SELECT * FROM ${meta.table} ORDER BY ${orderCol} DESC NULLS LAST LIMIT $1`,
     [limit]
   );
-  let rows = r.rows.map(meta.map);
-  if (collection === 'MenuItem' || collection === 'Product') {
-    rows = await Promise.all(rows.map((row) => enrichProductItem(row)));
-  }
+  const rows = r.rows.map(meta.map);
   return applySort(rows, sortKey).slice(0, limit);
 }
 
 function matchesFilters(item, filters) {
   return Object.entries(filters).every(([k, v]) => {
     if (k === 'shop_id' && item.merchant_id) return item.shop_id === v || item.merchant_id === v;
+    if (['recipient_email', 'customer_email', 'owner_email', 'email', 'partner_email', 'driver_email'].includes(k)) {
+      return String(item[k] || '').toLowerCase() === String(v || '').toLowerCase();
+    }
     return item[k] === v;
   });
 }
@@ -607,6 +624,7 @@ export function makePgEntity(collectionName) {
             !!payload.is_read,
           ]
         );
+        notifyListeners('Notification');
         return rowToGeneric(r.rows[0]);
       }
       if (collectionName === 'Wallet') {
@@ -729,6 +747,43 @@ export function makePgEntity(collectionName) {
         return merchantToShop(r.rows[0]);
       }
 
+      if (collectionName === 'Branch') {
+        const map = {
+          name: 'name',
+          address: 'address',
+          city: 'city',
+          phone: 'phone',
+          lat: 'lat',
+          lng: 'lng',
+          opening_hours: 'operating_hours',
+          operating_hours: 'operating_hours',
+          estimated_delivery_time: 'estimated_delivery_time',
+          is_open: 'is_open',
+          delivery_radius_km: 'delivery_radius_km',
+          pickup_lat: 'pickup_lat',
+          pickup_lng: 'pickup_lng',
+        };
+        const fields = [];
+        const vals = [];
+        let i = 1;
+        for (const [k, col] of Object.entries(map)) {
+          if (data[k] !== undefined) {
+            fields.push(`${col} = $${i++}`);
+            vals.push(data[k]);
+          }
+        }
+        if (!fields.length) throw new Error('No valid branch fields to update');
+        fields.push('updated_at = NOW()');
+        vals.push(id);
+        const r = await query(
+          `UPDATE merchant_branches SET ${fields.join(', ')} WHERE id = $${i} RETURNING *`,
+          vals
+        );
+        if (!r.rows[0]) throw new Error(`Item ${id} not found in Branch`);
+        notifyListeners('Branch');
+        return branchToApi(r.rows[0]);
+      }
+
       if (collectionName === 'Order') {
         const allowed = [
           'status', 'driver_email', 'driver_name', 'driver_phone', 'driver_lat', 'driver_lng',
@@ -828,6 +883,7 @@ export function makePgEntity(collectionName) {
           [data.is_read ?? null, data.title ?? null, data.body ?? null, id]
         );
         if (!r.rows[0]) throw new Error('Not found');
+        notifyListeners('Notification');
         return rowToGeneric(r.rows[0]);
       }
 
@@ -863,6 +919,7 @@ export function makePgEntity(collectionName) {
         await query(`DELETE FROM order_items WHERE order_id = $1`, [id]);
       }
       await query(`DELETE FROM ${meta.table} WHERE id = $1`, [id]);
+      if (collectionName === 'Notification') notifyListeners('Notification');
       return { id };
     },
   };

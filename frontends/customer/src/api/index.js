@@ -24,3 +24,4 @@ export * from './pure/shopHours.js';
 export * from './pure/etaEngine.js';
 export * from './chat.js';
 export * from './profile.js';
+export * from './location.js';

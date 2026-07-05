@@ -7,6 +7,8 @@ import {
   updateUser,
   listUsersSafe,
   ensureDemoUsers,
+  checkAccountAvailability,
+  resetPassword,
 } from './users.js';
 import { signToken, authMiddleware, requireRole } from './middleware.js';
 
@@ -34,6 +36,33 @@ router.post('/register', async (req, res) => {
     const safe = await registerUser(req.body);
     const token = signToken(safe);
     res.status(201).json({ user: safe, token });
+  } catch (e) {
+    if (e.code === 'ACCOUNT_EXISTS') {
+      return res.status(409).json({
+        message: e.message,
+        code: e.code,
+        field: e.field,
+        existingEmail: e.existingEmail,
+      });
+    }
+    res.status(400).json({ message: e.message });
+  }
+});
+
+router.post('/check-account', async (req, res) => {
+  try {
+    const result = await checkAccountAvailability(req.body);
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ message: e.message });
+  }
+});
+
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const result = await resetPassword(email, password);
+    res.json(result);
   } catch (e) {
     res.status(400).json({ message: e.message });
   }
