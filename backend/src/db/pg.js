@@ -40,6 +40,26 @@ export async function query(text, params) {
   return p.query(text, params);
 }
 
+/**
+ * Idempotent, self-applying schema patches for columns that were added after
+ * the original schema shipped. Safe to run on every boot; each statement is a
+ * no-op when the column already exists. Keeps PG deployments working without a
+ * separate migration runner.
+ */
+export async function ensureSchemaPatches() {
+  if (!isPostgresEnabled()) return;
+  const patches = [
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ`,
+  ];
+  for (const sql of patches) {
+    try {
+      await query(sql);
+    } catch (e) {
+      console.error('[DashZW PG] schema patch failed:', sql, e.message);
+    }
+  }
+}
+
 export async function checkPostgres() {
   if (!isPostgresEnabled()) {
     return { enabled: false, ok: false, message: 'DATABASE_URL not set — using JSON files' };

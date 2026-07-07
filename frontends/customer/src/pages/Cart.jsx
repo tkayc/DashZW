@@ -29,7 +29,6 @@ export default function Cart() {
     driverTip, setDriverTip,
     cartCoupon, setCartCoupon,
     cartVoucher, setCartVoucher,
-    useWalletPreview, setUseWalletPreview,
     saveCart, restoreSavedCart, hasSavedCart, multiMerchantEnabled,
   } = useCart();
 
@@ -73,7 +72,6 @@ export default function Cart() {
   }
 
   const tipAmount = driverTip || 0;
-  const walletPreview = useWalletPreview ? Math.min(walletBalance, subtotal + tipAmount) : 0;
 
   return (
     <div className="px-4 pt-6 pb-4 space-y-4">
@@ -191,21 +189,15 @@ export default function Cart() {
         <p className="text-[10px] text-muted-foreground">Codes are validated at checkout.</p>
       </div>
 
-      {/* Wallet */}
+      {/* Wallet — auto-applied at checkout */}
       {walletBalance > 0 && (
-        <label className="flex items-center gap-3 bg-card rounded-2xl p-4 border border-border/50 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={useWalletPreview}
-            onChange={(e) => setUseWalletPreview(e.target.checked)}
-            className="rounded"
-          />
-          <Wallet className="w-4 h-4 text-primary" />
+        <div className="flex items-center gap-3 bg-blue-50 rounded-2xl p-4 border border-blue-200">
+          <Wallet className="w-4 h-4 text-primary shrink-0" />
           <div className="flex-1">
-            <p className="text-sm font-medium">Use wallet balance</p>
-            <p className="text-xs text-muted-foreground">{formatUSD(walletBalance)} available</p>
+            <p className="text-sm font-medium text-blue-900">Wallet credit available</p>
+            <p className="text-xs text-blue-800">{formatUSD(walletBalance)} — applied automatically at checkout</p>
           </div>
-        </label>
+        </div>
       )}
 
       {/* Driver tip */}
@@ -259,11 +251,10 @@ export default function Cart() {
               <span className="font-medium">{formatUSD(tipAmount)}</span>
             </div>
           )}
-          {walletPreview > 0 && (
-            <div className="flex justify-between text-sm text-green-700">
-              <span>Wallet (preview)</span>
-              <span>−{formatUSD(walletPreview)}</span>
-            </div>
+          {walletBalance > 0 && (
+            <p className="text-xs text-blue-700">
+              Wallet credit ({formatUSD(walletBalance)}) applies at checkout
+            </p>
           )}
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">Delivery fee</span>
@@ -273,7 +264,7 @@ export default function Cart() {
           <div className="flex justify-between">
             <span className="font-bold">Est. subtotal</span>
             <span className="font-bold text-lg">
-              {formatUSD(Math.max(0, subtotal + tipAmount - walletPreview))}
+              {formatUSD(subtotal + tipAmount)}
             </span>
           </div>
         </div>

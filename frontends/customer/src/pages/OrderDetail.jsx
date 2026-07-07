@@ -574,14 +574,19 @@ export default function OrderDetail() {
               )}
               {order.wallet_applied > 0 && (
                 <div className="flex justify-between text-blue-600">
-                  <span>Wallet</span>
+                  <span>Wallet credit applied</span>
                   <span>−{formatUSD(order.wallet_applied)}</span>
                 </div>
               )}
               <div className="flex justify-between font-bold text-foreground pt-1 border-t border-border mt-1">
-                <span>Total paid</span>
+                <span>{order.wallet_applied > 0 ? 'Amount due' : 'Total paid'}</span>
                 <span>{formatUSD(order.total)}</span>
               </div>
+              {order.wallet_applied > 0 && (
+                <p className="text-[10px] text-blue-700">
+                  {formatUSD(order.wallet_applied)} paid from your DashZW wallet
+                </p>
+              )}
               <p className="text-[10px] pt-1 capitalize">
                 Paid via {(order.payment_method || '').replace(/_/g, ' ')} · #{order.id?.slice(-8)}
               </p>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { base44 } from '@/api';
 import { useNavigate } from 'react-router-dom';
@@ -15,11 +15,11 @@ import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
 import { useDeliveryLocation } from '@/lib/LocationContext';
 import { locationApi } from '@/api/location';
+import { formatDeliveryLine, deliveryHasCoords } from '@location/utils/deliveryAddress.js';
 import { calcDistanceFromShop, getBrowserLocation } from '@/api';
 import { calcDeliveryFee, buildPricing, calcServiceFee, getBalance, placeOrder } from '@/api';
 import { calcSurgeMultiplier } from '@/api';
 import { getCollectionSync, getCollection } from '@/api';
-import { notifyOrderPlaced } from '@/api';
 import { validateAdminCoupon, calcAdminPromoDiscount, getProfile, updateProfile } from '@/api';
 import { ORDER_STATUS_ON_CREATE, isActiveOrderStatus } from '@/domain/orderStates';
 
@@ -37,6 +37,11 @@ function calcShopCouponDiscount(promo, subtotal) {
   return 0;
 }
 
+function applySurgeFee(fee, surge) {
+  if (!surge?.active || surge.multiplier <= 1) return fee;
+  return parseFloat((fee * surge.multiplier).toFixed(2));
+}
+
 export default function Checkout() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -45,46 +50,72 @@ export default function Checkout() {
     items, shopId, shopName, clearCart, deliveryMode, deliveryAddress: savedAddress,
     deliveryInstructions, setDeliveryInstructions, driverTip, setDriverTip,
     specialNotes, setSpecialNotes, cartCoupon, cartVoucher,
-    useWalletPreview, setDeliveryMode,
+    setDeliveryMode,
   } = useCart();
 
   const [profile, setProfile] = useState({});
+  const addressTouched = useRef(false);
+  const [selectedSavedId, setSelectedSavedId] = useState(delivery?.address_id || null);
+
   useEffect(() => {
     if (user?.email) getProfile(user.email).then(setProfile).catch(() => setProfile({}));
   }, [user?.email]);
-  const [address, setAddress]   = useState(savedAddress || delivery?.formatted_address || profile.address || '');
-  const [phone, setPhone]       = useState(profile.phone || delivery?.phone_number || '');
+
+  const initialDeliveryLine = formatDeliveryLine(delivery) || savedAddress || '';
+  const [address, setAddress] = useState(initialDeliveryLine);
+  const [phone, setPhone] = useState(profile.phone || delivery?.phone_number || '');
   const [scheduledTime, setScheduledTime] = useState(null);
   const [paymentMethod, setPayment] = useState('ecocash');
-  const [useWalletPayment, setUseWalletPayment] = useState(useWalletPreview !== false);
   const [isSubmitting, setSubmitting] = useState(false);
 
   const [shop, setShop]             = useState(null);
   const [distanceKm, setDistanceKm] = useState(null);
   const [calcingDist, setCalcingDist] = useState(false);
-  const [gpsCoords, setGpsCoords]   = useState(
-    delivery?.lat != null ? { lat: delivery.lat, lng: delivery.lng } : null
+  const [gpsCoords, setGpsCoords] = useState(
+    deliveryHasCoords(delivery) ? { lat: delivery.lat, lng: delivery.lng } : null
   );
   const [distError, setDistError]   = useState('');
   const [savedAddresses, setSavedAddresses] = useState([]);
   const [recipientName, setRecipientName] = useState(delivery?.recipient_name || '');
-  const [addressMode, setAddressMode] = useState('current'); // current | new | saved
+  const [addressMode, setAddressMode] = useState('current');
+  const isPickup = deliveryMode === 'pickup';
+
+  // Keep checkout in sync with header / saved delivery location until user edits the field
+  useEffect(() => {
+    if (isPickup || addressTouched.current) return;
+
+    const line = formatDeliveryLine(delivery) || savedAddress || profile.address || '';
+    if (line) setAddress(line);
+
+    if (deliveryHasCoords(delivery)) {
+      setGpsCoords({ lat: delivery.lat, lng: delivery.lng });
+    }
+
+    if (delivery?.address_id) setSelectedSavedId(delivery.address_id);
+    if (delivery?.phone_number && !phone.trim()) setPhone(delivery.phone_number);
+    if (delivery?.recipient_name && !recipientName.trim()) setRecipientName(delivery.recipient_name);
+    if (delivery?.delivery_instructions && !deliveryInstructions.trim()) {
+      setDeliveryInstructions(delivery.delivery_instructions);
+    }
+  }, [
+    delivery,
+    savedAddress,
+    profile.address,
+    isPickup,
+    phone,
+    recipientName,
+    deliveryInstructions,
+    setDeliveryInstructions,
+  ]);
 
   useEffect(() => {
-    if (delivery?.lat != null) {
-      setGpsCoords({ lat: delivery.lat, lng: delivery.lng });
-      if (addressMode === 'current') {
-        setAddress(delivery.formatted_address || delivery.street_address || address);
-      }
-    }
-  }, [delivery?.lat, delivery?.lng]);
+    if (profile.phone && !phone.trim()) setPhone(profile.phone);
+  }, [profile.phone, phone]);
 
   useEffect(() => {
     if (!user?.email) return;
     locationApi.listAddresses().then(setSavedAddresses).catch(() => setSavedAddresses([]));
   }, [user?.email]);
-
-  const isPickup = deliveryMode === 'pickup';
 
   const [walletBalance, setWalletBalance] = useState(0);
   const [pricing, setPricing] = useState(null);
@@ -92,6 +123,11 @@ export default function Checkout() {
   const [deliveryFee, setDeliveryFee] = useState(null);
   const [adminPromoResult, setAdminPromoResult] = useState({ discountAmount: 0, freeDelivery: false });
   const [surge, setSurge] = useState({ active: false, multiplier: 1, reason: null });
+  const [appliedPromo, setAppliedPromo] = useState(null);
+  const [appliedAdminPromo, setAppliedAdminPromo] = useState(null);
+  const [couponInput, setCouponInput] = useState(cartCoupon || '');
+  const [couponChecking, setCouponChecking] = useState(false);
+  const [couponError, setCouponError] = useState('');
 
   useEffect(() => {
     calcSurgeMultiplier().then(setSurge).catch(() => setSurge({ active: false, multiplier: 1 }));
@@ -119,34 +155,37 @@ export default function Checkout() {
     const shopCoords = (shop.lat && shop.lng) ? { lat: shop.lat, lng: shop.lng } : null;
     if (!shopCoords) { setDistError('Shop location not available'); return; }
 
+    const activeCoords = gpsCoords || (deliveryHasCoords(delivery) ? { lat: delivery.lat, lng: delivery.lng } : null);
+
     // Use stored coordinates when available (GPS or saved address)
-    if (gpsCoords) {
-      locationApi.getMerchantQuote(shopId, gpsCoords.lat, gpsCoords.lng)
+    if (activeCoords) {
+      locationApi.getMerchantQuote(shopId, activeCoords.lat, activeCoords.lng)
         .then((q) => {
           if (q?.distance_km != null) {
             setDistanceKm(q.distance_km);
             setDistError(q.deliverable === false ? 'Outside merchant delivery radius' : '');
           } else {
-            const km = calcDistanceSync(shopCoords, gpsCoords);
+            const km = calcDistanceSync(shopCoords, activeCoords);
             setDistanceKm(km);
             setDistError('');
           }
         })
         .catch(() => {
-          const km = calcDistanceSync(shopCoords, gpsCoords);
+          const km = calcDistanceSync(shopCoords, activeCoords);
           setDistanceKm(km);
         });
       return;
     }
 
     // Otherwise debounce-geocode the typed address
-    if (!address.trim()) { setDistanceKm(null); return; }
+    const line = address.trim() || formatDeliveryLine(delivery) || savedAddress || '';
+    if (!line) { setDistanceKm(null); return; }
 
     const timer = setTimeout(async () => {
       setCalcingDist(true);
       setDistError('');
       try {
-        const km = await calcDistanceFromShop(shopCoords, address);
+        const km = await calcDistanceFromShop(shopCoords, line);
         if (km === null) {
           setDistError('Address not found — try adding more detail (e.g. suburb, city)');
           setDistanceKm(null);
@@ -161,7 +200,7 @@ export default function Checkout() {
     }, 900);
 
     return () => clearTimeout(timer);
-  }, [address, gpsCoords, shop, isPickup]);
+  }, [address, gpsCoords, delivery, savedAddress, shop, shopId, isPickup]);
 
   // Haversine distance for GPS coords (sync, no require needed)
   function calcDistanceSync(shopCoords, customerCoords) {
@@ -178,6 +217,9 @@ export default function Checkout() {
   const handleUseMyLocation = async () => {
     setCalcingDist(true);
     setDistError('');
+    addressTouched.current = true;
+    setAddressMode('current');
+    setSelectedSavedId(null);
     const coords = await getBrowserLocation();
     if (!coords) {
       setDistError('Location permission denied. Please type your address instead.');
@@ -216,7 +258,8 @@ export default function Checkout() {
         }
         return;
       }
-      const raw = await calcDeliveryFee(distanceKm, activeOrderCount);
+      const baseFee = await calcDeliveryFee(distanceKm, activeOrderCount);
+      const raw = applySurgeFee(baseFee, surge);
       const fee = isFreeDelivery ? 0 : raw;
       const p = await buildPricing(partnerSubtotal, fee);
       if (!cancelled) {
@@ -228,7 +271,7 @@ export default function Checkout() {
     return () => {
       cancelled = true;
     };
-  }, [distanceKm, isPickup, partnerSubtotal, activeOrderCount, isFreeDelivery]);
+  }, [distanceKm, isPickup, partnerSubtotal, activeOrderCount, isFreeDelivery, surge]);
 
   useEffect(() => {
     if (!pricing) {
@@ -251,7 +294,7 @@ export default function Checkout() {
       ? parseFloat((priceAfterCoupons + tipAmount).toFixed(2))
       : null;
   const walletApplied =
-    useWalletPayment && totalBeforeWallet != null
+    totalBeforeWallet != null && walletBalance > 0
       ? Math.min(walletBalance, totalBeforeWallet)
       : 0;
   const finalTotal =
@@ -260,7 +303,10 @@ export default function Checkout() {
       : null;
   const estimatedArrivalMins = distanceKm != null ? Math.round(20 + distanceKm * 3) : null;
 
-  if (!items.length) { navigate('/cart'); return null; }
+  useEffect(() => {
+    if (!items.length) navigate('/cart');
+  }, [items.length, navigate]);
+  if (!items.length) return null;
 
   const handleApplyCoupon = async () => {
     const code = couponInput.trim();
@@ -283,16 +329,23 @@ export default function Checkout() {
   };
 
   const handlePlaceOrder = async () => {
+    const deliveryLine = address.trim() || formatDeliveryLine(delivery) || savedAddress || '';
     if (shop?.min_order_amount && partnerSubtotal < shop.min_order_amount) {
       toast.error(`Minimum order is ${formatUSD(shop.min_order_amount.toFixed(2))} for ${shopName}`);
       return;
     }
-    if (!isPickup && !address.trim()) { toast.error('Please enter your delivery address'); return; }
+    if (!isPickup && !deliveryLine && !gpsCoords) { toast.error('Please enter your delivery address'); return; }
     if (!phone.trim())  { toast.error('Please enter your phone number'); return; }
     if (!isPickup && distanceKm == null) {
-      toast.error(distError || 'Calculating distance — please wait a moment'); return;
+      const waitingOnDistance = gpsCoords || deliveryHasCoords(delivery) || address.trim() || formatDeliveryLine(delivery);
+      toast.error(
+        waitingOnDistance
+          ? (distError || 'Calculating delivery distance — please wait a moment')
+          : 'Please enter your delivery address'
+      );
+      return;
     }
-    if (!pricing) {
+    if (!pricing || totalBeforeWallet == null || !Number.isFinite(totalBeforeWallet)) {
       toast.error('Still calculating totals — please wait');
       return;
     }
@@ -341,7 +394,7 @@ export default function Checkout() {
             ? parseFloat(Math.max(0, (rawDeliveryFee || 0) - serviceOnRaw).toFixed(2))
             : pricing.driverEarning,
         distance_km:       distanceKm,
-        delivery_address:  isPickup ? '' : address,
+        delivery_address:  isPickup ? '' : deliveryLine,
         delivery_city:     delivery?.city || 'Johannesburg',
         dest_lat:          gpsCoords?.lat || null,
         dest_lng:          gpsCoords?.lng || null,
@@ -366,14 +419,12 @@ export default function Checkout() {
         adjustment_requests: [],
         status: ORDER_STATUS_ON_CREATE,
         total_before_wallet: totalBeforeWallet,
-        use_wallet: useWalletPayment,
       });
 
       const order = result.order;
       if (appliedPromo) {
         await base44.entities.Promotion.update(appliedPromo.id, { times_used: (appliedPromo.times_used || 0) + 1 });
       }
-      notifyOrderPlaced(order);
       clearCart();
       toast.success(
         result.wallet_applied > 0
@@ -383,7 +434,8 @@ export default function Checkout() {
       navigate(`/order/${order.id}/confirmed`);
     } catch (err) {
       console.error(err);
-      toast.error(err.message || 'Failed to place order. Please try again.');
+      const msg = err.message || 'Failed to place order. Please try again.';
+      toast.error(msg === 'Failed to fetch' ? 'Could not reach server — check that the API is running and try again.' : msg);
     } finally { setSubmitting(false); }
   };
 
@@ -417,19 +469,30 @@ export default function Checkout() {
       </div>
 
       {/* Saved addresses (mock) */}
-      {!isPickup && (
+      {!isPickup && savedAddresses.length > 0 && (
         <div className="flex gap-2 mb-4 overflow-x-auto no-scrollbar">
           {savedAddresses.map((a) => (
             <button
               key={a.id}
               type="button"
               onClick={() => {
-                if (profile.address) setAddress(profile.address);
-                toast.message(`${a.label} address — manage in Profile → Addresses`);
+                selectAddress(a);
+                addressTouched.current = false;
+                setSelectedSavedId(a.id);
+                setAddressMode('saved');
+                setAddress(a.formatted_address || a.street_address || '');
+                if (a.lat != null && a.lng != null) setGpsCoords({ lat: a.lat, lng: a.lng });
+                if (a.phone_number) setPhone(a.phone_number);
+                if (a.recipient_name) setRecipientName(a.recipient_name);
+                if (a.delivery_instructions) setDeliveryInstructions(a.delivery_instructions);
               }}
-              className="shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80"
+              className={`shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium border ${
+                selectedSavedId === a.id
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-muted text-muted-foreground border-transparent hover:bg-muted/80'
+              }`}
             >
-              {a.label}
+              {a.address_name || a.label || 'Saved'}
             </button>
           ))}
         </div>
@@ -446,16 +509,16 @@ export default function Checkout() {
         </div>
       )}
 
-      {/* Wallet credit notice */}
+      {/* Wallet credit notice — applied automatically at checkout */}
       {walletBalance > 0 && (
         <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3 mb-4">
           <span className="text-xl">💙</span>
           <div className="flex-1">
             <p className="font-semibold text-sm text-blue-800">
-              Wallet balance available: {formatUSD(walletBalance)}
+              Wallet balance: {formatUSD(walletBalance)}
             </p>
             <p className="text-xs text-blue-700 mt-0.5">
-              Applied automatically at checkout (amount confirmed by server)
+              Any available credit is applied automatically to this order total.
             </p>
           </div>
         </div>
@@ -484,6 +547,9 @@ export default function Checkout() {
                     placeholder="e.g. 123 Rivonia Rd, Sandton"
                     value={address}
                     onChange={e => {
+                      addressTouched.current = true;
+                      setAddressMode('new');
+                      setSelectedSavedId(null);
                       setAddress(e.target.value);
                       setGpsCoords(null);
                       setDistanceKm(null);
@@ -526,9 +592,14 @@ export default function Checkout() {
               {distError && !calcingDist && (
                 <p className="text-xs text-orange-600 mt-1.5">{distError}</p>
               )}
-              {!address.trim() && !calcingDist && !distanceKm && (
-                <p className="text-xs text-muted-foreground mt-1.5">
+              {!address.trim() && !formatDeliveryLine(delivery) && !calcingDist && !distanceKm && (
+                <p className="text-xs text-amber-700 mt-1.5">
                   Type your address or tap 📍 to use your current location
+                </p>
+              )}
+              {!addressTouched.current && formatDeliveryLine(delivery) && (
+                <p className="text-xs text-green-700 mt-1.5">
+                  Using your delivery address from the header
                 </p>
               )}
             </div>
@@ -679,22 +750,7 @@ export default function Checkout() {
             </label>
           ))}
         </RadioGroup>
-        {/* Wallet payment placeholder — credit still auto-applied when enabled */}
-        {walletBalance > 0 && (
-          <label className="flex items-center gap-3 p-3 rounded-xl mt-2 bg-blue-50 border border-blue-200 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={useWalletPayment}
-              onChange={(e) => setUseWalletPayment(e.target.checked)}
-              className="rounded"
-            />
-            <span className="text-sm font-medium text-blue-900">
-              Use wallet balance ({formatUSD(walletBalance)})
-            </span>
-          </label>
-        )}
         <p className="text-[10px] text-muted-foreground mt-2">
-          {/* TODO(payments): Tokenized saved methods + full wallet-as-sole-payment */}
           Saved cards / EcoCash tokens will appear here after payment provider integration.
         </p>
       </div>
@@ -706,15 +762,19 @@ export default function Checkout() {
           {items.map(item => (
             <div key={item.menu_item_id} className="flex justify-between text-sm">
               <span className="text-muted-foreground">{item.quantity}× {item.name}</span>
-              <span className="font-medium">{formatUSD((item.price * item.quantity * 1.05))}</span>
+              <span className="font-medium">{formatUSD(item.price * item.quantity)}</span>
             </div>
           ))}
           <Separator className="my-2" />
+          <div className="flex justify-between text-sm text-muted-foreground">
+            <span>Items subtotal</span>
+            <span>{formatUSD(partnerSubtotal)}</span>
+          </div>
           {pricing ? (
             <>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Subtotal (incl. 5% fee)</span>
-                <span>{formatUSD(pricing.customerSubtotal)}</span>
+                <span className="text-muted-foreground">Platform fee (5%)</span>
+                <span>{formatUSD(pricing.platformFee)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">
@@ -722,9 +782,15 @@ export default function Checkout() {
                   {isFreeDelivery && !isPickup && <span className="text-blue-600 font-medium"> — Free</span>}
                 </span>
                 <span className={isPickup || isFreeDelivery ? 'text-green-600 font-medium' : ''}>
-                  {isPickup ? 'FREE' : rawDeliveryFee != null ? `${formatUSD(rawDeliveryFee.toFixed(2))}` : '—'}
+                  {isPickup ? 'FREE' : rawDeliveryFee != null ? formatUSD(rawDeliveryFee.toFixed(2)) : '—'}
                 </span>
               </div>
+              {pricing.serviceFee > 0 && !isPickup && (
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Service fee (included in delivery)</span>
+                  <span>{formatUSD(pricing.serviceFee)}</span>
+                </div>
+              )}
               {totalDiscount > 0 && (
                 <div className="flex justify-between text-sm text-green-600 font-medium">
                   <span>Coupon discount</span><span>−{formatUSD(totalDiscount)}</span>
@@ -738,7 +804,7 @@ export default function Checkout() {
               )}
               {walletApplied > 0 && (
                 <div className="flex justify-between text-sm text-blue-600 font-medium">
-                  <span>Wallet applied (preview)</span>
+                  <span>Wallet credit</span>
                   <span>−{formatUSD(walletApplied)}</span>
                 </div>
               )}
@@ -760,7 +826,11 @@ export default function Checkout() {
             </>
           ) : (
             <p className="text-sm text-muted-foreground text-center py-2">
-              {calcingDist ? 'Calculating distance…' : 'Enter your address above'}
+              {calcingDist
+                ? 'Calculating distance…'
+                : (formatDeliveryLine(delivery) || gpsCoords || address.trim())
+                  ? 'Calculating delivery fee…'
+                  : 'Enter your address above'}
             </p>
           )}
         </div>
@@ -773,6 +843,8 @@ export default function Checkout() {
           ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Placing Order…</>
           : calcingDist
             ? 'Finding your location…'
+            : !readyToOrder && (formatDeliveryLine(delivery) || gpsCoords || address.trim())
+              ? 'Calculating delivery fee…'
             : finalTotal != null
               ? `Place Order — ${formatUSD(finalTotal.toFixed(2))}`
               : 'Enter address to continue'

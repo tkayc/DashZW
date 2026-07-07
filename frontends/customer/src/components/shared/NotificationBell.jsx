@@ -161,13 +161,14 @@ export default function NotificationBell() {
                     <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>
                     <p className="text-[10px] text-muted-foreground mt-1">{timeAgo(n.created_date)}</p>
                   </div>
-                  <button
-                    type="button"
+                  <span
+                    role="button"
+                    tabIndex={0}
                     onClick={(e) => handleDelete(e, n.id)}
-                    className="shrink-0 p-1 rounded-lg hover:bg-muted"
+                    className="shrink-0 p-1 rounded-lg hover:bg-muted cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5 text-muted-foreground" />
-                  </button>
+                  </span>
                 </div>
               </button>
             ))

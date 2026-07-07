@@ -86,11 +86,14 @@ export function LocationProvider({ children }) {
   }, [isAuthenticated, isGuest, locationService, setDelivery]);
 
   const selectAddress = useCallback((address) => {
+    const formatted =
+      address.formatted_address ||
+      [address.street_address, address.suburb, address.city].filter(Boolean).join(', ');
     setDelivery({
       address_id: address.id,
       lat: address.lat,
       lng: address.lng,
-      formatted_address: address.formatted_address || address.street_address,
+      formatted_address: formatted,
       street_address: address.street_address,
       suburb: address.suburb,
       city: address.city,

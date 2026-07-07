@@ -1,8 +1,10 @@
 // TODO(postgresql): Point entity clients at REST resources backed by PostgreSQL.
+import { resolveApiBaseUrl } from '@shared/apiBaseUrl.js';
+
 const TOKEN_KEY = 'dashzw_token';
 
 export function getApiBaseUrl() {
-  return import.meta.env.VITE_API_URL || 'http://localhost:3001';
+  return resolveApiBaseUrl();
 }
 
 export function getToken() {
@@ -154,6 +156,7 @@ export function createApiClient() {
     Wallet: makeEntityClient('Wallet'),
     Transaction: makeEntityClient('Transaction'),
     DriverProfile: makeEntityClient('DriverProfile'),
+    DriverIncident: makeEntityClient('DriverIncident'),
     Notification: makeEntityClient('Notification'),
   };
 

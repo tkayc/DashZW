@@ -20,10 +20,22 @@ import { seedDatabase } from './services/merchant/seedData.js';
 import { runOrderTimeoutCheck } from './services/orders/orderEngine.js';
 import { ensureDemoUsers } from './services/authentication/users.js';
 import { subscribeToDbChanges } from './db/store.js';
-import { checkPostgres, isPostgresEnabled } from './db/pg.js';
+import { checkPostgres, isPostgresEnabled, ensureSchemaPatches } from './db/pg.js';
 import { assertJwtConfigured } from './services/authentication/middleware.js';
 
 assertJwtConfigured();
+
+// Last-resort safety net. Route handlers and background jobs should already
+// catch their own errors (see routes/entities.js, orderEngine job below) —
+// this only guards against anything missed, so one bad request or a DB blip
+// can't take down the API for every app. Logged loudly so it still gets fixed
+// at the source; not a substitute for proper error handling upstream.
+process.on('unhandledRejection', (reason) => {
+  console.error('[DashZW] UNHANDLED REJECTION (process kept alive):', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[DashZW] UNCAUGHT EXCEPTION (process kept alive):', err);
+});
 
 if (!isPostgresEnabled()) {
   console.warn(
@@ -37,10 +49,24 @@ const API_VERSION = process.env.API_VERSION || 'v1';
 const app = express();
 
 const ORIGINS = (process.env.CORS_ORIGINS ||
-  'http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:5176'
-).split(',').map((s) => s.trim());
+  'http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:5176,' +
+  'http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175,http://127.0.0.1:5176'
+).split(',').map((s) => s.trim()).filter(Boolean);
 
-app.use(cors({ origin: ORIGINS, credentials: true }));
+const isDev = process.env.NODE_ENV !== 'production';
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || ORIGINS.includes(origin)) {
+      return callback(null, true);
+    }
+    if (isDev && /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?$/.test(origin)) {
+      return callback(null, true);
+    }
+    callback(null, false);
+  },
+  credentials: true,
+}));
 app.use(express.json({ limit: '8mb' }));
 app.use('/uploads', express.static(UPLOADS_ROOT));
 
@@ -108,10 +134,33 @@ function sseHandler(req, res) {
 app.get('/api/events', sseHandler);
 app.get(`/api/${API_VERSION}/events`, sseHandler);
 
-ensureDemoUsers();
-seedDatabase();
-setInterval(runOrderTimeoutCheck, 60_000);
-runOrderTimeoutCheck();
+Promise.resolve()
+  .then(() => ensureSchemaPatches())
+  .then(() => ensureDemoUsers())
+  .catch((e) => console.error('[DashZW] startup schema/demo-user init failed:', e?.message || e));
+
+Promise.resolve()
+  .then(() => seedDatabase())
+  .catch((e) => console.error('[DashZW] seedDatabase failed:', e?.message || e));
+
+// Background job: must never crash the process on a transient DB error.
+async function safeRunOrderTimeoutCheck() {
+  try {
+    await runOrderTimeoutCheck();
+  } catch (e) {
+    console.error('[DashZW] runOrderTimeoutCheck failed (will retry next cycle):', e?.message || e);
+  }
+}
+setInterval(safeRunOrderTimeoutCheck, 60_000);
+safeRunOrderTimeoutCheck();
+
+// Catches errors passed via next(err), and synchronous throws in route
+// handlers. Must be registered after all routes.
+app.use((err, _req, res, _next) => {
+  console.error('[DashZW] Unhandled route error:', err?.message || err);
+  if (res.headersSent) return;
+  res.status(500).json({ message: 'Internal server error' });
+});
 
 app.listen(PORT, async () => {
   console.log(`[DashZW API] http://localhost:${PORT}`);

@@ -4,18 +4,19 @@ import { useAuth } from '@/lib/AuthContext';
 import { useRealtimeQuery as useQuery } from '@/api';
 import { base44 } from '@/api';
 import { getBalance, useBalance } from '@/api';
-import { getPartnerSettlements } from '@/api';
+import { getMerchantFinancialSummary, getPartnerSettlements } from '@/api';
 import { getCollectionSync, getCollection } from '@/api';
 import { DollarSign, TrendingUp, Clock, CheckCircle2, Wallet, Calendar } from 'lucide-react';
 import { format, subDays, startOfDay } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
+import { normalizeOrderStatus, ORDER_STATUS } from '@/domain/orderStates';
 
 export default function PartnerEarnings() {
   const { user } = useAuth();
   const [period, setPeriod] = useState('week'); // today|week|month|all
 
   const { data: shop } = useQuery({
-    queryKey: ['my-shop', user?.email],
+    queryKey: ['partner-shop', user?.email],
     queryFn: () => base44.entities.Shop.filter({ owner_email: user?.email }).then(r => r[0]),
     enabled: !!user?.email,
   });
@@ -28,9 +29,11 @@ export default function PartnerEarnings() {
 
   const walletBalance  = useBalance(user?.email, 'partner');
   const [settlements, setSettlements] = useState([]);
+  const [finSummary, setFinSummary] = useState(null);
   useEffect(() => {
     if (!user?.email) return;
     getPartnerSettlements(user.email).then(setSettlements).catch(() => setSettlements([]));
+    getMerchantFinancialSummary(user.email).then(setFinSummary).catch(() => setFinSummary(null));
   }, [user?.email]);
   const txs            = getCollectionSync('Transaction').filter(t => t.owner_email === user?.email).slice(-20).reverse();
 
@@ -42,10 +45,11 @@ export default function PartnerEarnings() {
     all:   new Date(0),
   }[period];
 
-  const delivered = orders.filter(o =>
-    o.status === 'delivered' &&
-    new Date(o.created_date) >= periodStart
-  );
+  const delivered = orders.filter(o => {
+    const s = normalizeOrderStatus(o.status);
+    return (s === ORDER_STATUS.DELIVERED || s === ORDER_STATUS.COMPLETED) &&
+      new Date(o.created_date) >= periodStart;
+  });
   const revenue    = delivered.reduce((s, o) => s + (o.partner_payout || 0), 0);
   const orderCount = delivered.length;
   const avgOrder   = orderCount ? revenue / orderCount : 0;
@@ -113,6 +117,25 @@ export default function PartnerEarnings() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Ledger settlement buckets */}
+      {finSummary && (
+        <div className="bg-card rounded-2xl border border-border p-4 grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <p className="text-xs text-muted-foreground">Pending Settlement</p>
+            <p className="font-bold text-orange-700">{formatUSD(finSummary.pending_settlement?.toFixed(2) || '0.00')}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Available Settlement</p>
+            <p className="font-bold text-green-700">{formatUSD(finSummary.available_settlement?.toFixed(2) || '0.00')}</p>
+          </div>
+          {finSummary.next_settlement_date && (
+            <div className="col-span-2 text-xs text-muted-foreground">
+              Next settlement: {new Date(finSummary.next_settlement_date).toLocaleDateString()}
+            </div>
+          )}
         </div>
       )}
 

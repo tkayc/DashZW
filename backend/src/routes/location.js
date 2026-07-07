@@ -2,7 +2,7 @@
  * Location API routes — addresses, geocoding, discovery, tracking, navigation.
  */
 import { Router } from 'express';
-import { authMiddleware } from '../services/authentication/middleware.js';
+import { authMiddleware, optionalAuth } from '../services/authentication/middleware.js';
 import { localDb } from '../db/localDb.js';
 import {
   getMapsConfig,
@@ -63,6 +63,21 @@ router.get('/config', (_req, res) => {
     openstreetmap: { tileUrl: cfg.openstreetmap.tileUrl },
     defaults: cfg.defaults,
   });
+});
+
+// Public merchant discovery (browse without login)
+router.get('/merchants/discover', optionalAuth, async (req, res) => {
+  try {
+    const lat = req.query.lat != null ? Number(req.query.lat) : null;
+    const lng = req.query.lng != null ? Number(req.query.lng) : null;
+    const sort = req.query.sort || 'nearest';
+    const limit = parseInt(req.query.limit, 10) || 50;
+    const category = req.query.category || null;
+    const merchants = await discoverMerchants({ lat, lng, sort, limit, category, localDb });
+    res.json(merchants);
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
 });
 
 router.use(authMiddleware);
@@ -185,21 +200,8 @@ router.delete('/addresses/:id', async (req, res) => {
   }
 });
 
-// ── Merchant discovery ───────────────────────────────────────────────────────
-router.get('/merchants/discover', async (req, res) => {
-  try {
-    const lat = req.query.lat != null ? Number(req.query.lat) : null;
-    const lng = req.query.lng != null ? Number(req.query.lng) : null;
-    const sort = req.query.sort || 'nearest';
-    const limit = parseInt(req.query.limit, 10) || 50;
-    const category = req.query.category || null;
-    const merchants = await discoverMerchants({ lat, lng, sort, limit, category, localDb });
-    res.json(merchants);
-  } catch (e) {
-    res.status(500).json({ message: e.message });
-  }
-});
 
+// ── Merchant discovery (authenticated quote) ───────────────────────────────────
 router.get('/merchants/:id/quote', async (req, res) => {
   try {
     const lat = Number(req.query.lat);

@@ -1,14 +1,25 @@
 import { Router } from 'express';
-import { authMiddleware } from '../services/authentication/middleware.js';
+import { optionalAuth } from '../services/authentication/middleware.js';
 import { localDb } from '../db/localDb.js';
 import { getPolicy } from './entityPolicy.js';
 import { notifyOrderStatusChanged } from '../services/notifications/notifications.js';
-import { normalizeOrderStatus } from '../domain/orderStates.js';
+import { ORDER_STATUS, normalizeOrderStatus } from '../domain/orderStates.js';
+import { settleOrder } from '../services/financial/settlementService.js';
+import { reserveFloatForOrder } from '../services/financial/driverFloatService.js';
 
 const COLLECTIONS = Object.keys(localDb.entities);
 const router = Router();
 
-router.use(authMiddleware);
+// Optional JWT — publicRead collections (Shop, MenuItem, etc.) work for guests
+router.use(optionalAuth);
+
+function requireAuth(req, res) {
+  if (!req.user) {
+    res.status(401).json({ message: 'Not authenticated' });
+    return false;
+  }
+  return true;
+}
 
 function normalizeRole(role) {
   if (role === 'merchant_owner') return 'partner';
@@ -58,8 +69,9 @@ function roleAllowed(user, policy) {
 
 async function canReadRecord(user, collection, record) {
   const policy = getPolicy(collection);
-  if (isAdmin(user)) return true;
   if (policy.publicRead) return true;
+  if (!user) return false;
+  if (isAdmin(user)) return true;
 
   const email = userEmail(user);
   const owner = await resolveOwnerEmail(collection, record);
@@ -109,9 +121,15 @@ async function canWriteRecord(user, collection, record) {
     if (owner && owner === email) return true;
   }
 
-  if (isDriver(user) && policy.allowDriverRW && policy.driverField) {
-    const de = (record[policy.driverField] || '').toLowerCase();
-    if (de && de === email) return true;
+  if (isDriver(user) && policy.allowDriverRW && collection === 'Order') {
+    const status = normalizeOrderStatus(record.status);
+    if (!record.driver_email && status === ORDER_STATUS.READY_FOR_PICKUP) {
+      return true;
+    }
+    if (policy.driverField) {
+      const de = (record[policy.driverField] || '').toLowerCase();
+      if (de && de === email) return true;
+    }
   }
 
   return false;
@@ -119,8 +137,9 @@ async function canWriteRecord(user, collection, record) {
 
 function canListCollection(user, collection) {
   const policy = getPolicy(collection);
-  if (isAdmin(user)) return true;
   if (policy.publicRead) return true;
+  if (!user) return false;
+  if (isAdmin(user)) return true;
   if (policy.allowOwnerRead || policy.allowOwnerRW) return true;
   if (isPartner(user) && (policy.partnerRoles || policy.allowPartnerRW || policy.resolveOwner)) return true;
   if (isDriver(user) && (policy.driverField || policy.allowDriverReadUnassigned)) return true;
@@ -157,7 +176,9 @@ async function canCreateInCollection(user, collection, body) {
 
 async function filterVisible(user, collection, rows) {
   const policy = getPolicy(collection);
-  if (isAdmin(user) || policy.publicRead) return rows;
+  if (policy.publicRead) return rows;
+  if (!user) return [];
+  if (isAdmin(user)) return rows;
 
   const email = userEmail(user);
 
@@ -193,30 +214,50 @@ function forbid(res, message = 'Forbidden') {
 }
 
 router.get('/:collection/list', async (req, res) => {
-  const { collection } = req.params;
-  if (!COLLECTIONS.includes(collection)) return res.status(404).json({ message: 'Unknown collection' });
-  if (!canListCollection(req.user, collection)) return forbid(res);
+  try {
+    const { collection } = req.params;
+    if (!COLLECTIONS.includes(collection)) return res.status(404).json({ message: 'Unknown collection' });
+    if (!canListCollection(req.user, collection)) return forbid(res);
 
-  const { sort = '-created_date', limit = '50' } = req.query;
-  const data = await localDb.entities[collection].list(sort, parseInt(limit, 10) || 50);
-  res.json(await filterVisible(req.user, collection, data));
+    const { sort = '-created_date', limit = '50' } = req.query;
+    const data = await localDb.entities[collection].list(sort, parseInt(limit, 10) || 50);
+    res.json(await filterVisible(req.user, collection, data));
+  } catch (err) {
+    console.error(`[entities] GET /${req.params.collection}/list failed:`, err?.message || err);
+    res.status(503).json({ message: 'Data temporarily unavailable, please retry' });
+  }
 });
 
 router.get('/:collection/filter', async (req, res) => {
-  const { collection } = req.params;
-  if (!COLLECTIONS.includes(collection)) return res.status(404).json({ message: 'Unknown collection' });
-  if (!canListCollection(req.user, collection)) return forbid(res);
+  try {
+    const { collection } = req.params;
+    if (!COLLECTIONS.includes(collection)) return res.status(404).json({ message: 'Unknown collection' });
+    if (!canListCollection(req.user, collection)) return forbid(res);
 
-  const filters = req.query.filters ? JSON.parse(req.query.filters) : {};
-  const { sort = '-created_date', limit = '100' } = req.query;
-  const data = await localDb.entities[collection].filter(filters, sort, parseInt(limit, 10) || 100);
-  res.json(await filterVisible(req.user, collection, data));
+    const filters = req.query.filters ? JSON.parse(req.query.filters) : {};
+    const { sort = '-created_date', limit = '100' } = req.query;
+    const data = await localDb.entities[collection].filter(filters, sort, parseInt(limit, 10) || 100);
+    res.json(await filterVisible(req.user, collection, data));
+  } catch (err) {
+    console.error(`[entities] GET /${req.params.collection}/filter failed:`, err?.message || err);
+    res.status(503).json({ message: 'Data temporarily unavailable, please retry' });
+  }
 });
 
 router.post('/:collection', async (req, res) => {
+  if (!requireAuth(req, res)) return;
   const { collection } = req.params;
   if (!COLLECTIONS.includes(collection)) return res.status(404).json({ message: 'Unknown collection' });
 
+  try {
+    return await createEntity(req, res, collection);
+  } catch (err) {
+    console.error(`[entities] POST /${collection} failed:`, err?.message || err);
+    return res.status(503).json({ message: 'Could not save — please retry' });
+  }
+});
+
+async function createEntity(req, res, collection) {
   const body = { ...req.body };
 
   // Never allow clients to invent wallet balances
@@ -269,12 +310,22 @@ router.post('/:collection', async (req, res) => {
 
   const item = await localDb.entities[collection].create(body);
   res.status(201).json(item);
-});
+}
 
 router.patch('/:collection/:id', async (req, res) => {
+  if (!requireAuth(req, res)) return;
   const { collection, id } = req.params;
   if (!COLLECTIONS.includes(collection)) return res.status(404).json({ message: 'Unknown collection' });
 
+  try {
+    return await patchEntity(req, res, collection, id);
+  } catch (err) {
+    console.error(`[entities] PATCH /${collection}/${id} failed:`, err?.message || err);
+    return res.status(503).json({ message: 'Could not save — please retry' });
+  }
+});
+
+async function patchEntity(req, res, collection, id) {
   if (collection === 'Wallet' || collection === 'Transaction' || collection === 'Settlement') {
     if (!isAdmin(req.user)) return forbid(res, 'Direct wallet/settlement writes are not allowed');
   }
@@ -287,6 +338,21 @@ router.patch('/:collection/:id', async (req, res) => {
   // Prevent ownership reassignment
   const body = { ...req.body };
   delete body.id;
+
+  if (isDriver(req.user) && collection === 'Order' && !existing.driver_email) {
+    const existingStatus = normalizeOrderStatus(existing.status);
+    if (existingStatus === ORDER_STATUS.READY_FOR_PICKUP && body.driver_email) {
+      const assignee = body.driver_email.toLowerCase();
+      if (assignee !== userEmail(req.user)) {
+        return forbid(res, 'Can only assign yourself as driver');
+      }
+    }
+    if (existingStatus === ORDER_STATUS.READY_FOR_PICKUP && body.status) {
+      body.driver_email = body.driver_email || req.user.email;
+      body.driver_name = body.driver_name || req.user.full_name || req.user.email;
+    }
+  }
+
   if (!isAdmin(req.user)) {
     delete body.owner_email;
     delete body.customer_email;
@@ -301,7 +367,15 @@ router.patch('/:collection/:id', async (req, res) => {
     }
   }
 
-  const item = await localDb.entities[collection].update(id, body);
+  let item = await localDb.entities[collection].update(id, body);
+
+  if (collection === 'Order' && body.driver_email && !existing.driver_email) {
+    try {
+      await reserveFloatForOrder(body.driver_email || req.user.email, { ...existing, ...item }, req.user.email);
+    } catch (err) {
+      console.error('reserveFloatForOrder failed:', err?.message || err);
+    }
+  }
 
   if (collection === 'Order' && body.status) {
     const prev = normalizeOrderStatus(existing.status);
@@ -309,25 +383,42 @@ router.patch('/:collection/:id', async (req, res) => {
     if (prev !== next) {
       void notifyOrderStatusChanged(item, body.status);
     }
+    const settleStatuses = [ORDER_STATUS.DELIVERED, ORDER_STATUS.COMPLETED];
+    if (settleStatuses.includes(next) && !item.settled_at) {
+      try {
+        await settleOrder(item);
+        item = await localDb.entities.Order.update(id, {
+          settled_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error('settleOrder failed:', err?.message || err);
+      }
+    }
   }
 
   res.json(item);
-});
+}
 
 router.delete('/:collection/:id', async (req, res) => {
+  if (!requireAuth(req, res)) return;
   const { collection, id } = req.params;
   if (!COLLECTIONS.includes(collection)) return res.status(404).json({ message: 'Unknown collection' });
 
-  if (collection === 'Wallet' || collection === 'Transaction' || collection === 'Settlement') {
-    if (!isAdmin(req.user)) return forbid(res);
+  try {
+    if (collection === 'Wallet' || collection === 'Transaction' || collection === 'Settlement') {
+      if (!isAdmin(req.user)) return forbid(res);
+    }
+
+    const existing = (await localDb.entities[collection].filter({ id }, '-created_date', 1))[0];
+    if (!existing) return res.status(404).json({ message: 'Not found' });
+    if (!(await canWriteRecord(req.user, collection, existing))) return forbid(res);
+
+    await localDb.entities[collection].delete(id);
+    res.json({ id });
+  } catch (err) {
+    console.error(`[entities] DELETE /${collection}/${id} failed:`, err?.message || err);
+    res.status(503).json({ message: 'Could not delete — please retry' });
   }
-
-  const existing = (await localDb.entities[collection].filter({ id }, '-created_date', 1))[0];
-  if (!existing) return res.status(404).json({ message: 'Not found' });
-  if (!(await canWriteRecord(req.user, collection, existing))) return forbid(res);
-
-  await localDb.entities[collection].delete(id);
-  res.json({ id });
 });
 
 export default router;

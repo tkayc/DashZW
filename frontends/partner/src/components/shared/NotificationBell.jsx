@@ -90,12 +90,25 @@ export default function NotificationBell() {
     }
   };
 
+  // Backend notification links are emitted with cross-app prefixes
+  // (e.g. "/partner/orders"). This SPA is mounted at the app root, so strip the
+  // prefix and map targets that don't exist here to the closest real route.
+  const normalizeLink = (link) => {
+    if (!link) return null;
+    let l = link;
+    if (l.startsWith('/partner/')) l = l.slice('/partner'.length);
+    else if (l === '/partner') l = '/';
+    if (l.startsWith('/order/')) l = '/orders';
+    return l;
+  };
+
   const handleClick = async (n) => {
     try {
       await markRead(n.id);
     } catch {}
     setOpen(false);
-    if (n.link) navigate(n.link);
+    const target = normalizeLink(n.link);
+    if (target) navigate(target);
   };
 
   const handleDelete = async (e, id) => {
@@ -147,13 +160,14 @@ export default function NotificationBell() {
                     <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>
                     <p className="text-[10px] text-muted-foreground mt-1">{timeAgo(n.created_date)}</p>
                   </div>
-                  <button
-                    type="button"
+                  <span
+                    role="button"
+                    tabIndex={0}
                     onClick={(e) => handleDelete(e, n.id)}
-                    className="shrink-0 p-1 rounded-lg hover:bg-muted"
+                    className="shrink-0 p-1 rounded-lg hover:bg-muted cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5 text-muted-foreground" />
-                  </button>
+                  </span>
                 </div>
               </button>
             ))

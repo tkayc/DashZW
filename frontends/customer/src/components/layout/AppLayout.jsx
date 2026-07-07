@@ -7,6 +7,8 @@ import { UtensilsCrossed, ChevronDown, MapPin, Search, X, Check } from 'lucide-r
 import { delivery as deliveryIcon } from '@assets/icons/index.js';
 import DeliveryAddressBar from '@/components/location/DeliveryAddressBar';
 import { useCart } from '@/lib/CartContext';
+import { useDeliveryLocation } from '@/lib/LocationContext';
+import { formatDeliveryLine } from '@location/utils/deliveryAddress.js';
 import { Input } from '@/components/ui/input';
 
 // ── Delivery Mode Popup ───────────────────────────────────────────────────────
@@ -103,7 +105,9 @@ function DeliveryModePopup({ mode, onSelect, address, onAddressChange, onClose }
 
 // ── AppLayout ─────────────────────────────────────────────────────────────────
 export default function AppLayout() {
-  const { deliveryMode, setDeliveryMode, deliveryAddress, setDeliveryAddress, itemCount } = useCart();
+  const { deliveryMode, setDeliveryMode, setDeliveryAddress, itemCount } = useCart();
+  const { delivery, setDelivery } = useDeliveryLocation();
+  const headerAddress = formatDeliveryLine(delivery);
   const [showModePopup, setShowModePopup] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -133,6 +137,18 @@ export default function AppLayout() {
     setSearchDraft('');
     navigate('/search', { replace: true });
     searchInputRef.current?.focus();
+  };
+
+  const handleHeaderAddressChange = (value) => {
+    setDeliveryAddress(value);
+    setDelivery({
+      ...(delivery || {}),
+      formatted_address: value,
+      street_address: value,
+      lat: null,
+      lng: null,
+      source: 'manual',
+    });
   };
 
   return (
@@ -182,7 +198,7 @@ export default function AppLayout() {
               type="button"
               onClick={() => setShowModePopup(true)}
               className="flex items-center gap-1.5 bg-primary text-primary-foreground rounded-2xl px-3 py-2.5 text-xs font-semibold shrink-0 hover:bg-primary/90 transition-colors whitespace-nowrap"
-              title={deliveryAddress || 'Delivery address'}
+              title={headerAddress || 'Delivery address'}
             >
               <img src={deliveryIcon} alt="" className="w-4 h-4 object-contain" />
               <span>{deliveryMode === 'pickup' ? 'Pickup' : 'Delivery'}</span>
@@ -205,8 +221,8 @@ export default function AppLayout() {
         <DeliveryModePopup
           mode={deliveryMode}
           onSelect={setDeliveryMode}
-          address={deliveryAddress}
-          onAddressChange={setDeliveryAddress}
+          address={headerAddress}
+          onAddressChange={handleHeaderAddressChange}
           onClose={() => setShowModePopup(false)}
         />
       )}

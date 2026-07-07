@@ -7,6 +7,7 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Loader2, LocateFixed, ZoomIn, ZoomOut } from 'lucide-react';
+import { resolveApiBaseUrl } from '../../apiBaseUrl.js';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -82,7 +83,7 @@ export default function PlatformMap({
   const [tileUrl, setTileUrl] = useState('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/location/config`)
+    fetch(`${resolveApiBaseUrl()}/api/location/config`)
       .then((r) => r.json())
       .then((cfg) => {
         if (cfg.openstreetmap?.tileUrl) setTileUrl(cfg.openstreetmap.tileUrl);

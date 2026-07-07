@@ -528,6 +528,7 @@ CREATE TABLE IF NOT EXISTS orders (
   pack_progress         JSONB NOT NULL DEFAULT '{}'::jsonb,
   cancel_reason         TEXT,
   delivered_at          TIMESTAMPTZ,
+  settled_at            TIMESTAMPTZ,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

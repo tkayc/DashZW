@@ -24,9 +24,11 @@ import {
 } from '@/api';
 import { getSettlements, settlePartnerWallet, getCodReceivables } from '@/api';
 import { getSurgeConfig, setSurgeConfig, calcSurgeMultiplier } from '@/api';
+import { resetOrderData, factoryReset } from '@/api';
 import AdminUsersPanel from './AdminUsersInline';
 import { toast } from 'sonner';
 import DeliveryMap from '@/components/map/DeliveryMap';
+import { normalizeOrderStatus, ORDER_STATUS } from '@/domain/orderStates';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -54,11 +56,17 @@ const PROMO_TYPES = [
 
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
-// ── Late delivery alert (>45 min since picked_up/on_the_way) ─────────────────
+function isSuccessfulOrder(order) {
+  const s = normalizeOrderStatus(order.status);
+  return s === ORDER_STATUS.DELIVERED || s === ORDER_STATUS.COMPLETED;
+}
+
+// ── Late delivery alert (>45 min since picked_up/in_transit) ─────────────────
 function useLateDeliveries(orders) {
   const now = Date.now();
   return orders.filter(o => {
-    if (!['picked_up','on_the_way'].includes(o.status)) return false;
+    const s = normalizeOrderStatus(o.status);
+    if (s !== ORDER_STATUS.PICKED_UP && s !== ORDER_STATUS.IN_TRANSIT) return false;
     const updated = new Date(o.updated_date).getTime();
     return (now - updated) > 45 * 60 * 1000;
   });
@@ -340,11 +348,15 @@ export default function AdminDashboard() {
     queryFn: () => base44.entities.Order.list('-created_date', 500),
     refetchInterval: 30000,
   });
+  const { data: staff = [] } = useQuery({
+    queryKey: ['admin-staff'],
+    queryFn: () => base44.entities.MerchantStaff.list('-created_date', 200),
+  });
 
   useEffect(() => {
     getAdminPromotions().then(setPromos).catch(() => setPromos([]));
     getSettlements().then(setSettlements).catch(() => setSettlements([]));
-    getBalance(PLATFORM_EMAIL).then(setPlatformBalance).catch(() => setPlatformBalance(0));
+    getBalance(PLATFORM_EMAIL, 'platform').then(setPlatformBalance).catch(() => setPlatformBalance(0));
     getCodReceivables().then(setCodReceivables).catch(() => setCodReceivables(0));
     getSurgeConfig().then(setSurgeConfigState).catch(() => setSurgeConfigState({}));
     calcSurgeMultiplier().then(setCurrentSurge).catch(() => setCurrentSurge({ active: false, multiplier: 1 }));
@@ -365,11 +377,29 @@ export default function AdminDashboard() {
 
   const txs              = getCollectionSync('Transaction').filter(t => t.owner_email === PLATFORM_EMAIL).reverse();
   const wallets          = getCollectionSync('Wallet');
+  const successfulOrders = orders.filter(isSuccessfulOrder);
   const pendingShops     = shops.filter(s => s.approval_status === 'pending');
   const approvedShops    = shops.filter(s => s.approval_status !== 'rejected');
-  const deliveredOrders  = orders.filter(o => o.status === 'delivered');
-  const activeOrders     = orders.filter(o => !['delivered','cancelled','completed','refunded'].includes(o.status));
+  const activeOrders     = orders.filter(o => !isSuccessfulOrder(o) && normalizeOrderStatus(o.status) !== ORDER_STATUS.CANCELLED && normalizeOrderStatus(o.status) !== ORDER_STATUS.REFUNDED);
   const lateDeliveries   = useLateDeliveries(orders);
+
+  const totalRevenue = successfulOrders.reduce((s, o) => s + (o.platform_earning || 0), 0);
+  const totalGmv = successfulOrders.reduce((s, o) => s + (o.customer_subtotal || o.total || 0), 0);
+  const totalPartnerPayouts = successfulOrders.reduce((s, o) => s + (o.partner_payout || 0), 0);
+  const totalDriverEarnings = successfulOrders.reduce((s, o) => s + (o.driver_earning || 0) + (o.driver_tip || 0), 0);
+  const todayOrders  = successfulOrders.filter(o =>
+    new Date(o.created_date).toDateString() === new Date().toDateString()
+  );
+  const todayRevenue = todayOrders.reduce((s, o) => s + (o.platform_earning || 0), 0);
+
+  const shopEarnings = approvedShops.map(shop => {
+    const shopOrders = successfulOrders.filter(o => o.shop_id === shop.id);
+    const platformEarn = shopOrders.reduce((s, o) => s + (o.platform_earning || 0), 0);
+    const partnerEarn = shopOrders.reduce((s, o) => s + (o.partner_payout || 0), 0);
+    const gmv    = shopOrders.reduce((s, o) => s + (o.customer_subtotal || o.total || 0), 0);
+    const shopStaff = staff.filter(s => s.shop_id === shop.id || s.merchant_id === shop.id);
+    return { shop, orderCount: shopOrders.length, platformEarn, partnerEarn, gmv, staffCount: shopStaff.length };
+  }).sort((a, b) => b.platformEarn - a.platformEarn);
 
   useEffect(() => {
     if (activeTab !== 'settlements') return;
@@ -382,19 +412,6 @@ export default function AdminDashboard() {
       })
     ).then((pairs) => setPartnerBalances(Object.fromEntries(pairs)));
   }, [activeTab, shops]);
-
-  const totalRevenue = deliveredOrders.reduce((s, o) => s + (o.platform_earning || 0), 0);
-  const todayOrders  = deliveredOrders.filter(o =>
-    new Date(o.created_date).toDateString() === new Date().toDateString()
-  );
-  const todayRevenue = todayOrders.reduce((s, o) => s + (o.platform_earning || 0), 0);
-
-  const shopEarnings = approvedShops.map(shop => {
-    const shopOrders = deliveredOrders.filter(o => o.shop_id === shop.id);
-    const earned = shopOrders.reduce((s, o) => s + (o.platform_earning || 0), 0);
-    const gmv    = shopOrders.reduce((s, o) => s + (o.customer_subtotal || o.total || 0), 0);
-    return { shop, orderCount: shopOrders.length, earned, gmv };
-  }).sort((a, b) => b.earned - a.earned);
 
   const approveShop = async (shop) => {
     await base44.entities.Shop.update(shop.id, { approval_status: 'approved' });
@@ -467,6 +484,7 @@ export default function AdminDashboard() {
     { id: 'wallets',     label: 'Wallets',      icon: Wallet },
     { id: 'settlements', label: 'Settlements',  icon: DollarSign },
     { id: 'users',       label: 'Users',        icon: Users },
+    { id: 'staff',       label: 'Staff',        icon: Users, alert: staff.length || undefined },
     { id: 'surge',       label: 'Surge Pricing', icon: TrendingUp },
   ];
 
@@ -531,11 +549,12 @@ export default function AdminDashboard() {
         {/* ── OVERVIEW ── */}
         {activeTab === 'overview' && (
           <>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <StatCard icon={DollarSign}  label="Total Earnings"  value={`${formatUSD(totalRevenue.toFixed(2))}`} sub={`${formatUSD(todayRevenue.toFixed(2))} today`} color="bg-green-50 text-green-700" />
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+              <StatCard icon={DollarSign}  label="Platform Earnings"  value={`${formatUSD(totalRevenue.toFixed(2))}`} sub={`${formatUSD(todayRevenue.toFixed(2))} today`} color="bg-green-50 text-green-700" />
               <StatCard icon={Store}       label="Active Shops"    value={approvedShops.length}           sub={`${pendingShops.length} pending`}     color="bg-blue-50 text-blue-700" />
-              <StatCard icon={ShoppingBag} label="Total Orders"    value={orders.length}                  sub={`${activeOrders.length} active`}      color="bg-purple-50 text-purple-700" />
-              <StatCard icon={CheckCircle2}label="Delivered"       value={deliveredOrders.length}         sub={`${todayOrders.length} today`}        color="bg-primary/10 text-primary" />
+              <StatCard icon={ShoppingBag} label="Completed Orders"    value={successfulOrders.length}                  sub={`${activeOrders.length} active`}      color="bg-purple-50 text-purple-700" />
+              <StatCard icon={Users}       label="Staff"           value={staff.length}                   sub={`${approvedShops.length} merchants`}  color="bg-orange-50 text-orange-700" />
+              <StatCard icon={CheckCircle2}label="GMV"             value={formatUSD(totalGmv.toFixed(2))} sub={`Partners ${formatUSD(totalPartnerPayouts.toFixed(2))} · Drivers ${formatUSD(totalDriverEarnings.toFixed(2))}`} color="bg-primary/10 text-primary" />
             </div>
 
             {/* ── Admin danger zone: reset buttons ── */}
@@ -543,9 +562,9 @@ export default function AdminDashboard() {
               <p className="text-xs font-semibold text-red-600 uppercase tracking-wide mb-3">⚠️ Data Management</p>
               <div className="flex gap-2 flex-wrap">
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     if (!window.confirm('Reset ALL orders, wallets and transactions? Shops and menus will be kept.')) return;
-                    resetOrderData();
+                    await resetOrderData();
                     qc.invalidateQueries();
                     toast.success('Orders and wallets reset. Shops and menus kept.');
                   }}
@@ -553,9 +572,9 @@ export default function AdminDashboard() {
                   🗑️ Reset Orders &amp; Wallets
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     if (!window.confirm('FULL FACTORY RESET? This clears everything except user accounts. App will re-seed fresh.')) return;
-                    factoryReset();
+                    await factoryReset();
                     qc.invalidateQueries();
                     toast.success('Factory reset done. Reload the page to re-seed.');
                     setTimeout(() => window.location.reload(), 1500);
@@ -621,7 +640,7 @@ export default function AdminDashboard() {
                 <p className="text-center text-muted-foreground py-8 text-sm">No delivered orders yet</p>
               ) : (
                 <div className="divide-y divide-border">
-                  {shopEarnings.map(({ shop, orderCount, earned, gmv }) => (
+                  {shopEarnings.map(({ shop, orderCount, platformEarn, partnerEarn, gmv, staffCount }) => (
                     <div key={shop.id} className="flex items-center justify-between px-5 py-4">
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
@@ -629,12 +648,15 @@ export default function AdminDashboard() {
                         </div>
                         <div>
                           <p className="font-semibold text-sm text-foreground">{shop.name}</p>
-                          <p className="text-xs text-muted-foreground">{orderCount} orders · GMV ${gmv.toFixed(2)}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {orderCount} orders · GMV {formatUSD(gmv.toFixed(2))}
+                            {staffCount > 0 && ` · ${staffCount} staff`}
+                          </p>
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="font-bold text-green-700">${earned.toFixed(2)}</p>
-                        <p className="text-xs text-muted-foreground">platform earn</p>
+                        <p className="font-bold text-green-700">{formatUSD(platformEarn.toFixed(2))}</p>
+                        <p className="text-xs text-muted-foreground">platform · partner {formatUSD(partnerEarn.toFixed(2))}</p>
                       </div>
                     </div>
                   ))}
@@ -757,8 +779,8 @@ export default function AdminDashboard() {
             )}
             <h2 className="font-bold text-foreground">All Shops ({shops.length})</h2>
             {shops.map(shop => {
-              const shopOrders = deliveredOrders.filter(o => o.shop_id === shop.id);
-              const earned = shopOrders.reduce((s, o) => s + (o.platform_earning || 0), 0);
+              const shopOrders = successfulOrders.filter(o => o.shop_id === shop.id);
+              const earned = shopOrders.reduce((s, o) => s + (o.partner_payout || 0), 0);
               const status = shop.approval_status || 'approved';
               return (
                 <div key={shop.id} className="bg-card rounded-2xl border border-border p-4">
@@ -1118,6 +1140,40 @@ export default function AdminDashboard() {
             <p className="text-xs text-muted-foreground">
               ℹ️ Surge multiplier is applied to the distance-based delivery fee before the customer sees it. Max is 2.0×. Platform service fee tier is calculated on the surged fee.
             </p>
+          </div>
+        )}
+
+        {/* ── STAFF ── */}
+        {activeTab === 'staff' && (
+          <div className="space-y-4">
+            <h2 className="font-bold text-foreground">Merchant Staff ({staff.length})</h2>
+            {staff.length === 0 ? (
+              <div className="bg-card rounded-2xl border border-border p-12 text-center">
+                <Users className="w-10 h-10 mx-auto mb-3 text-muted-foreground/30" />
+                <p className="font-semibold text-foreground">No staff records yet</p>
+                <p className="text-sm text-muted-foreground mt-1">Partners can add staff from their shop profile</p>
+              </div>
+            ) : (
+              <div className="bg-card rounded-2xl border border-border divide-y divide-border overflow-hidden">
+                {staff.map((member) => {
+                  const shop = shops.find(s => s.id === member.shop_id || s.id === member.merchant_id);
+                  return (
+                    <div key={member.id} className="flex items-center justify-between px-5 py-4 gap-3">
+                      <div>
+                        <p className="font-semibold text-sm text-foreground">{member.name || member.email}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {member.role || 'staff'} · {shop?.name || member.shop_id || 'Unknown shop'}
+                        </p>
+                      </div>
+                      <div className="text-right text-xs text-muted-foreground">
+                        {member.email && <p>{member.email}</p>}
+                        {member.phone && <p>{member.phone}</p>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 

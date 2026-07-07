@@ -3,6 +3,7 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Heart, Share2, Clock, Package, Plus, Minus, Check } from 'lucide-react';
 import { base44 } from '@/api';
 import { useRealtimeQuery as useQuery } from '@/api';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useCart } from '@/lib/CartContext';
@@ -154,7 +155,7 @@ export default function ProductDetail() {
     }
   };
 
-  if (isLoading || !product) {
+  if (isLoading) {
     return (
       <div className="animate-pulse">
         <div className="h-64 bg-muted" />
@@ -166,12 +167,25 @@ export default function ProductDetail() {
     );
   }
 
+  if (!product) {
+    return (
+      <div className="text-center py-20 px-4">
+        <Package className="w-12 h-12 text-muted-foreground/40 mx-auto mb-3" />
+        <p className="font-semibold text-foreground">Product not found</p>
+        <p className="text-sm text-muted-foreground mt-1">This item may no longer be available.</p>
+        <Button variant="outline" className="mt-4" onClick={() => navigate(-1)}>Go back</Button>
+      </div>
+    );
+  }
+
+  const heroSrc = images[imageIdx]?.url || product.image_url;
+
   return (
     <div className="pb-8">
       <div className="relative h-64 bg-muted">
-        {(images[imageIdx] || product.image_url) ? (
+        {heroSrc ? (
           <img
-            src={images[imageIdx] || product.image_url}
+            src={heroSrc}
             alt={product.name}
             className="w-full h-full object-cover"
           />

@@ -13,6 +13,7 @@ import AdminUsers from '@/pages/AdminUsers';
 import AdminSection from '@/pages/AdminSection';
 import PlatformSettings from '@/pages/PlatformSettings';
 import AdminLiveMap from '@/pages/AdminLiveMap';
+import AdminFinancialDashboard from '@/pages/AdminFinancialDashboard';
 import SplashScreen from '@shared/components/SplashScreen';
 import { useAppSplash } from '@shared/hooks/useAppSplash';
 
@@ -61,6 +62,7 @@ function AppRoutes() {
         <Route path="/users" element={<AdminUsers />} />
         <Route path="/settings" element={<PlatformSettings />} />
         <Route path="/live-map" element={<AdminLiveMap />} />
+        <Route path="/financial" element={<AdminFinancialDashboard />} />
         {SECTIONS.map((s) => (
           <Route key={s} path={`/${s}`} element={<AdminSection section={s} />} />
         ))}

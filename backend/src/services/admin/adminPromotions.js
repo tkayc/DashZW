@@ -76,8 +76,12 @@ export async function deleteAdminPromotion(id) {
 
 // ── Validation ────────────────────────────────────────────────────────────────
 
-export function validateAdminCoupon(code, customerEmail, orderSubtotal) {
-  const promos = getCollection(KEY);
+export async function validateAdminCoupon(code, customerEmail, orderSubtotal) {
+  // Read promos from the active store (PostgreSQL or JSON) so coupons created
+  // in PG mode are actually found during validation.
+  const promos = isPostgresEnabled()
+    ? await localDb.entities.AdminPromotion.list('-created_date', 200)
+    : getCollection(KEY);
   const promo = promos.find(p =>
     p.coupon_code?.toUpperCase() === code?.toUpperCase() &&
     p.is_active
@@ -89,18 +93,29 @@ export function validateAdminCoupon(code, customerEmail, orderSubtotal) {
   const todayStr = today.toISOString().split('T')[0];
   const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][today.getDay()];
 
+  // Field name has drifted between "min_order_amount" (validation) and
+  // "min_order" (PG/seed) — accept either.
+  const minOrder = promo.min_order_amount ?? promo.min_order;
+
   if (promo.start_date && todayStr < promo.start_date)
     return { valid: false, error: 'This coupon is not active yet.' };
   if (promo.end_date && todayStr > promo.end_date)
     return { valid: false, error: 'This coupon has expired.' };
   if (promo.applicable_days?.length > 0 && !promo.applicable_days.includes(dayName))
     return { valid: false, error: `This coupon is only valid on: ${promo.applicable_days.join(', ')}.` };
-  if (promo.min_order_amount && orderSubtotal < promo.min_order_amount)
-    return { valid: false, error: `Minimum order ${promo.min_order_amount.toFixed(2)} required.` };
+  if (minOrder && orderSubtotal < minOrder)
+    return { valid: false, error: `Minimum order ${Number(minOrder).toFixed(2)} required.` };
   if (promo.max_uses && promo.times_used >= promo.max_uses)
     return { valid: false, error: 'This coupon has reached its usage limit.' };
   if (promo.new_users_only) {
-    const pastOrders = getCollection('Order').filter(o => o.customer_email === customerEmail && o.status === 'delivered');
+    const email = (customerEmail || '').toLowerCase();
+    const orders = isPostgresEnabled()
+      ? await localDb.entities.Order.filter({ customer_email: customerEmail }, '-created_date', 200)
+      : getCollection('Order');
+    const pastOrders = orders.filter(o =>
+      (o.customer_email || '').toLowerCase() === email &&
+      ['delivered', 'completed'].includes(o.status)
+    );
     if (pastOrders.length > 0) return { valid: false, error: 'This coupon is for new customers only.' };
   }
 

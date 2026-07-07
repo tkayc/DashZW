@@ -52,10 +52,47 @@ function mapPgUser(row) {
   };
 }
 
+const DEMO_USER_IDS = {
+  'customer@demo.com': 'usr_customer_demo',
+  'mamas@dashzw.com': 'usr_mamas',
+  'zimburger@dashzw.com': 'usr_zimburger',
+  'sunrise@dashzw.com': 'usr_sunrise',
+  'chillsip@dashzw.com': 'usr_chillsip',
+  'sweettooth@dashzw.com': 'usr_sweettooth',
+  'freshmart@dashzw.com': 'usr_freshmart',
+  'careplus@dashzw.com': 'usr_careplus',
+  'quickstop@dashzw.com': 'usr_quickstop',
+  'driver1@dashzw.com': 'usr_driver1',
+  'driver2@dashzw.com': 'usr_driver2',
+  'driver3@dashzw.com': 'usr_driver3',
+  'admin@dashzw.com': 'usr_admin',
+};
+
+async function ensurePostgresDemoUsers() {
+  for (const demo of DEMO_USERS) {
+    const email = demo.email.toLowerCase();
+    const id = DEMO_USER_IDS[email] || makeId(email);
+    await query(
+      `INSERT INTO users (id, email, password_hash, full_name, role, staff_role, email_verified, is_active)
+       VALUES ($1, $2, crypt($3, gen_salt('bf')), $4, $5, $6, TRUE, TRUE)
+       ON CONFLICT (email) DO UPDATE SET
+         password_hash = crypt($3, gen_salt('bf')),
+         full_name = EXCLUDED.full_name,
+         role = EXCLUDED.role,
+         staff_role = COALESCE(EXCLUDED.staff_role, users.staff_role),
+         is_active = TRUE`,
+      [id, email, demo.password, demo.full_name, demo.role, demo.staff_role || null]
+    );
+  }
+}
+
 // ── JSON fallback (no DATABASE_URL) ─────────────────────────────────────────
 
-export function ensureDemoUsers() {
-  if (isPostgresEnabled()) return []; // already seeded in SQL
+export async function ensureDemoUsers() {
+  if (isPostgresEnabled()) {
+    await ensurePostgresDemoUsers();
+    return [];
+  }
   let users = getUsersFile();
   if (!users.length) {
     users = DEMO_USERS.map((u) => ({
@@ -175,9 +212,13 @@ export async function checkAccountAvailability({ email, phone }) {
   return { available: true };
 }
 
+// Roles a user may self-assign during public registration. Privileged roles
+// (admin / super_admin) must never be grantable from the register endpoint.
+const SELF_REGISTRABLE_ROLES = new Set(['customer', 'partner', 'driver']);
+
 export async function registerUser({ email, password, full_name, role, phone }) {
   const em = email.toLowerCase().trim();
-  const resolvedRole = role || 'customer';
+  const resolvedRole = SELF_REGISTRABLE_ROLES.has(role) ? role : 'customer';
 
   const existingEmail = await findUserByEmail(em);
   if (existingEmail) {

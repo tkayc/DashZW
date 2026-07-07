@@ -4,10 +4,11 @@ import { useRealtimeQuery as useQuery } from '@/api';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Star, Clock, Bike, MapPin, Heart } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import MenuItemCard from '@/components/shop/MenuItemCard';
 import ShopReviews from '@/components/reviews/ShopReviews';
 import ShopPromotions from '@/components/shop/ShopPromotions';
-import { getShopStatus } from '@/api';
+import { getShopStatus, formatOpeningHours } from '@/api';
 import { getMerchantCategory } from '@/domain/merchantCategories';
 import { isMerchantFavourite, toggleMerchantFavourite } from '@/lib/favourites';
 import { trackMerchantView } from '@/lib/recentlyViewed';
@@ -22,7 +23,7 @@ export default function ShopDetail() {
   const navigate = useNavigate();
   const [fav, setFav] = useState(() => isMerchantFavourite(shopId));
 
-  const { data: shop, isLoading: shopLoading } = useQuery({
+  const { data: shop, isLoading: shopLoading, isError: shopError, error: shopLoadError } = useQuery({
     queryKey: ['shop', shopId],
     queryFn: async () => {
       const shops = await base44.entities.Shop.filter({ id: shopId });
@@ -31,7 +32,7 @@ export default function ShopDetail() {
     enabled: !!shopId,
   });
 
-  const { data: menuItems, isLoading: menuLoading } = useQuery({
+  const { data: menuItems, isLoading: menuLoading, isError: menuError, error: menuLoadError } = useQuery({
     queryKey: ['menu', shopId],
     queryFn: () => base44.entities.MenuItem.filter({ shop_id: shopId }),
     initialData: [],
@@ -53,7 +54,7 @@ export default function ShopDetail() {
   };
 
   // Group menu items by category
-  const grouped = menuItems.reduce((acc, item) => {
+  const grouped = (menuItems || []).reduce((acc, item) => {
     const cat = item.category || 'Other';
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(item);
@@ -68,6 +69,17 @@ export default function ShopDetail() {
           <div className="h-6 w-48 bg-muted rounded-lg" />
           <div className="h-4 w-64 bg-muted rounded-lg" />
         </div>
+      </div>
+    );
+  }
+
+  if (shopError) {
+    return (
+      <div className="text-center py-20 px-4">
+        <p className="text-4xl mb-3">⚠️</p>
+        <p className="font-semibold text-foreground">Could not load merchant</p>
+        <p className="text-sm text-muted-foreground mt-1">{shopLoadError?.message || 'Please check your connection and try again.'}</p>
+        <Button variant="outline" className="mt-4" onClick={() => navigate('/')}>Go Home</Button>
       </div>
     );
   }
@@ -170,7 +182,7 @@ export default function ShopDetail() {
             <p className={`text-xs mt-0.5 ${shopStatus.closingSoon ? 'text-orange-700' : 'text-muted-foreground'}`}>
               {shopStatus.closingSoon
                 ? 'Last orders are not being accepted. Browse the catalogue for next time!'
-                : `You can browse products but orders are paused.${shop.opening_hours ? ' Hours: ' + shop.opening_hours : ''}`}
+                : `You can browse products but orders are paused.${shop.opening_hours ? ` Hours: ${formatOpeningHours(shop.opening_hours)}` : ''}`}
             </p>
           </div>
         </div>
@@ -179,7 +191,11 @@ export default function ShopDetail() {
       {/* Product catalogue (same layout for all merchant types) */}
       <div className="px-4 mt-6">
         <h2 className="text-lg font-bold text-foreground mb-3">Products</h2>
-        {menuLoading ? (
+        {menuError ? (
+          <div className="text-center py-12">
+            <p className="text-muted-foreground text-sm">Could not load products. {menuLoadError?.message}</p>
+          </div>
+        ) : menuLoading ? (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
               <div key={i} className="h-28 bg-muted rounded-xl animate-pulse" />

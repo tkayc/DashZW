@@ -79,7 +79,7 @@ export async function notifyOrderPlaced(order) {
   await createNotification({
     recipient_email: order.customer_email,
     title: '✅ Order Placed!',
-    body: `Your order from ${name} has been received. Total: ${order.total?.toFixed(2)}`,
+    body: `Your order from ${name} has been received. Total: $${Number(order.total || 0).toFixed(2)}`,
     type: 'order_placed',
     link: `/order/${order.id}`,
   });
@@ -87,7 +87,7 @@ export async function notifyOrderPlaced(order) {
     await createNotification({
       recipient_email: order.partner_email,
       title: '🛎️ New Order!',
-      body: `New order from ${order.customer_name || 'a customer'} — ${order.partner_payout?.toFixed(2)} • ${order.payment_method?.replace(/_/g, ' ')}`,
+      body: `New order from ${order.customer_name || 'a customer'} — $${Number(order.partner_payout || 0).toFixed(2)} · ${order.payment_method?.replace(/_/g, ' ')}`,
       type: 'new_order',
       link: '/orders',
     });

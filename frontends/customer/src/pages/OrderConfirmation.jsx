@@ -20,10 +20,21 @@ export default function OrderConfirmation() {
     enabled: !!id,
   });
 
-  if (isLoading || !order) {
+  if (isLoading) {
     return (
       <div className="px-4 pt-16 text-center">
         <div className="w-10 h-10 border-4 border-muted border-t-primary rounded-full animate-spin mx-auto" />
+      </div>
+    );
+  }
+
+  if (!order) {
+    return (
+      <div className="px-4 pt-16 text-center space-y-4">
+        <p className="text-4xl">🧾</p>
+        <p className="font-semibold text-foreground">Order not found</p>
+        <p className="text-sm text-muted-foreground">We couldn't load this order. It may still be processing.</p>
+        <Button className="rounded-2xl" onClick={() => navigate('/orders')}>View all orders</Button>
       </div>
     );
   }
@@ -48,7 +59,10 @@ export default function OrderConfirmation() {
           <div>
             <p className="font-semibold">{order.merchant_name || order.shop_name}</p>
             <p className="text-xs text-muted-foreground">
-              {order.items?.length || 0} item(s) · {formatUSD((order.total || 0))}
+              {order.items?.length || 0} item(s)
+              {order.wallet_applied > 0
+                ? ` · ${formatUSD(order.wallet_applied)} wallet credit · ${formatUSD(order.total || 0)} due`
+                : ` · ${formatUSD(order.total || 0)}`}
             </p>
           </div>
         </div>

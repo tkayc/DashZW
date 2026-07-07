@@ -12,10 +12,10 @@ export const notifyReplacementNeeded = (o, n) => invoke('notifications', 'notify
 export const notifyReplacementResolved = (o, n, l) => invoke('notifications', 'notifyReplacementResolved', [o, n, l]);
 export const notifyShopApproved = (e, n) => invoke('notifications', 'notifyShopApproved', [e, n]);
 
-import { invalidateCollection } from '../client.js';
+import { invalidateCollection, getApiBaseUrl } from '../client.js';
 
 export function subscribeToDbChanges(fn) {
-  const url = `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/events`;
+  const url = `${getApiBaseUrl()}/api/events`;
   const es = new EventSource(url);
   es.onmessage = (ev) => {
     try {

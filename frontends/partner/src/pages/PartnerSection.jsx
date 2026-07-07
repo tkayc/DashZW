@@ -40,7 +40,7 @@ export default function PartnerSection({ shop, section }) {
           <Empty text="No staff records yet. Owner is created on registration." />
         ) : (
           staff.map((s) => (
-            <Row key={s.id} title={s.name || s.email} meta={s.role || s.staff_role} badge={s.status || 'active'} />
+            <Row key={s.id} title={s.name || s.user_email || s.email} meta={s.role || s.staff_role} badge={s.status || 'active'} />
           ))
         )}
       </SectionShell>

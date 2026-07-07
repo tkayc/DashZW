@@ -115,7 +115,7 @@ export default function AdminSection({ section }) {
   const approveShop = async (shop) => {
     try {
       await base44.entities.Shop.update(shop.id, { approval_status: 'approved' });
-      notifyShopApproved?.(shop);
+      notifyShopApproved?.(shop.owner_email, shop.name);
       toast.success(`${shop.name} approved`);
       refetchShops();
     } catch (e) {

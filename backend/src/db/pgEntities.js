@@ -44,13 +44,13 @@ function merchantToShop(row) {
     rating: row.rating != null ? Number(row.rating) : 0,
     rating_count: row.rating_count || 0,
     is_open: row.is_open,
-    opening_hours: row.opening_hours,
+    opening_hours: row.opening_hours || row.branch_operating_hours || null,
     min_order_amount: row.min_order_amount != null ? Number(row.min_order_amount) : 0,
     address: row.address,
     city: row.city,
     lat: row.lat != null ? Number(row.lat) : null,
     lng: row.lng != null ? Number(row.lng) : null,
-    estimated_delivery_time: row.estimated_delivery_time,
+    estimated_delivery_time: row.estimated_delivery_time || row.branch_eta || null,
     default_branch_id: row.default_branch_id,
     brand_color: row.brand_color,
     ecocash_number: meta.ecocash_number || '',
@@ -186,6 +186,71 @@ async function loadProductExtras(productId) {
       price: Number(r.price),
       is_available: r.is_available,
     })),
+  };
+}
+
+/**
+ * Batched version of loadProductExtras — fetches images/variants/addons for
+ * MANY products in 3 queries total instead of 3 queries PER product.
+ * Fixes an N+1 that made shop menu pages (50 items = 150 queries) slow.
+ */
+async function loadProductExtrasBatch(productIds) {
+  const empty = () => new Map();
+  if (!productIds?.length) {
+    return { imagesByProduct: empty(), variantsByProduct: empty(), addonsByProduct: empty() };
+  }
+
+  const [images, variants, addons] = await Promise.all([
+    query(
+      `SELECT id, product_id, url, sort_order FROM product_images WHERE product_id = ANY($1::text[]) ORDER BY product_id, sort_order, id`,
+      [productIds]
+    ),
+    query(
+      `SELECT id, product_id, name, price_delta, is_default, is_available FROM product_variants WHERE product_id = ANY($1::text[]) ORDER BY product_id, is_default DESC, name`,
+      [productIds]
+    ),
+    query(
+      `SELECT id, product_id, name, price, is_available FROM product_addons WHERE product_id = ANY($1::text[]) ORDER BY product_id, name`,
+      [productIds]
+    ),
+  ]);
+
+  const groupBy = (rows, mapRow) => {
+    const map = new Map();
+    for (const row of rows) {
+      if (!map.has(row.product_id)) map.set(row.product_id, []);
+      map.get(row.product_id).push(mapRow(row));
+    }
+    return map;
+  };
+
+  return {
+    imagesByProduct: groupBy(images.rows, (r) => ({ id: r.id, url: r.url, sort_order: r.sort_order })),
+    variantsByProduct: groupBy(variants.rows, (r) => ({
+      id: r.id,
+      name: r.name,
+      priceDelta: Number(r.price_delta),
+      price_delta: Number(r.price_delta),
+      is_default: r.is_default,
+      is_available: r.is_available,
+    })),
+    addonsByProduct: groupBy(addons.rows, (r) => ({ id: r.id, name: r.name, price: Number(r.price), is_available: r.is_available })),
+  };
+}
+
+function enrichProductItemWithExtras(item, extras) {
+  const imageUrls = extras.images.length
+    ? extras.images.map((i) => i.url)
+    : item.image_url
+      ? [item.image_url]
+      : [];
+  return {
+    ...item,
+    images: extras.images,
+    image_urls: imageUrls,
+    variants: extras.variants,
+    addons: extras.addons,
+    image_url: imageUrls[0] || item.image_url || null,
   };
 }
 
@@ -407,6 +472,18 @@ async function fetchAll(collection, sortKey, limit) {
     return applySort(rows, sortKey).slice(0, limit);
   }
 
+  if (collection === 'Shop' || collection === 'Merchant') {
+    const r = await query(
+      `SELECT m.*, b.operating_hours AS branch_operating_hours, b.estimated_delivery_time AS branch_eta
+       FROM merchants m
+       LEFT JOIN merchant_branches b ON b.id = m.default_branch_id
+       ORDER BY m.${orderCol} DESC NULLS LAST LIMIT $1`,
+      [limit]
+    );
+    const rows = r.rows.map((row) => merchantToShop(row));
+    return applySort(rows, sortKey).slice(0, limit);
+  }
+
   const r = await query(
     `SELECT * FROM ${meta.table} ORDER BY ${orderCol} DESC NULLS LAST LIMIT $1`,
     [limit]
@@ -421,8 +498,99 @@ function matchesFilters(item, filters) {
     if (['recipient_email', 'customer_email', 'owner_email', 'email', 'partner_email', 'driver_email'].includes(k)) {
       return String(item[k] || '').toLowerCase() === String(v || '').toLowerCase();
     }
+    if (k === 'is_active' || k === 'is_available' || k === 'is_open') {
+      return Boolean(item[k]) === Boolean(v);
+    }
     return item[k] === v;
   });
+}
+
+async function filterMerchantsSql(filters, sortKey, limit) {
+  const conditions = [];
+  const vals = [];
+  let i = 1;
+
+  if (filters.id) {
+    conditions.push(`m.id = $${i++}`);
+    vals.push(filters.id);
+  }
+  if (filters.owner_email) {
+    conditions.push(`LOWER(m.owner_email) = LOWER($${i++})`);
+    vals.push(filters.owner_email);
+  }
+  if (filters.approval_status) {
+    conditions.push(`m.approval_status = $${i++}`);
+    vals.push(filters.approval_status);
+  }
+  if (filters.category || filters.category_id) {
+    conditions.push(`m.category_id = $${i++}`);
+    vals.push(filters.category || filters.category_id);
+  }
+
+  const orderKey = sortKey?.startsWith('-') ? sortKey.slice(1) : sortKey;
+  const orderCol = { created_date: 'created_at', updated_date: 'updated_at' }[orderKey] || orderKey || 'created_at';
+  const desc = sortKey?.startsWith('-') !== false;
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const r = await query(
+    `SELECT m.*, b.operating_hours AS branch_operating_hours, b.estimated_delivery_time AS branch_eta
+     FROM merchants m
+     LEFT JOIN merchant_branches b ON b.id = m.default_branch_id
+     ${where}
+     ORDER BY m.${orderCol} ${desc ? 'DESC' : 'ASC'} NULLS LAST
+     LIMIT $${i}`,
+    [...vals, limit]
+  );
+  return r.rows.map((row) => merchantToShop(row));
+}
+
+async function filterProductsSql(filters, sortKey, limit) {
+  const conditions = [];
+  const vals = [];
+  let i = 1;
+
+  if (filters.id) {
+    conditions.push(`id = $${i++}`);
+    vals.push(filters.id);
+  }
+  const merchantId = filters.shop_id || filters.merchant_id;
+  if (merchantId) {
+    conditions.push(`merchant_id = $${i++}`);
+    vals.push(merchantId);
+  }
+  if (filters.is_available !== undefined) {
+    conditions.push(`is_available = $${i++}`);
+    vals.push(filters.is_available);
+  }
+
+  const orderKey = sortKey?.startsWith('-') ? sortKey.slice(1) : sortKey;
+  const orderCol = { created_date: 'created_at', updated_date: 'updated_at' }[orderKey] || orderKey || 'created_at';
+  const desc = sortKey?.startsWith('-') !== false;
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const r = await query(
+    `SELECT * FROM products ${where} ORDER BY ${orderCol} ${desc ? 'DESC' : 'ASC'} NULLS LAST LIMIT $${i}`,
+    [...vals, limit]
+  );
+  const rows = r.rows.map((row) => productToMenuItem(row));
+  const { imagesByProduct, variantsByProduct, addonsByProduct } = await loadProductExtrasBatch(
+    rows.map((row) => row.id)
+  );
+  return rows.map((item) =>
+    enrichProductItemWithExtras(item, {
+      images: imagesByProduct.get(item.id) || [],
+      variants: variantsByProduct.get(item.id) || [],
+      addons: addonsByProduct.get(item.id) || [],
+    })
+  );
+}
+
+function canUseMerchantSqlFilter(filters) {
+  return Boolean(filters.id || filters.owner_email || filters.approval_status || filters.category || filters.category_id);
+}
+
+function canUseProductSqlFilter(filters) {
+  return Boolean(filters.id || filters.shop_id || filters.merchant_id || filters.is_available !== undefined);
 }
 
 export function makePgEntity(collectionName) {
@@ -431,6 +599,12 @@ export function makePgEntity(collectionName) {
     list: async (sortKey = '-created_date', limit = 50) => fetchAll(collectionName, sortKey, limit),
 
     filter: async (filters = {}, sortKey = '-created_date', limit = 100) => {
+      if ((collectionName === 'Shop' || collectionName === 'Merchant') && canUseMerchantSqlFilter(filters)) {
+        return filterMerchantsSql(filters, sortKey, limit);
+      }
+      if ((collectionName === 'MenuItem' || collectionName === 'Product') && canUseProductSqlFilter(filters)) {
+        return filterProductsSql(filters, sortKey, limit);
+      }
       const all = await fetchAll(collectionName, sortKey, Math.max(limit, 500));
       return all.filter((item) => matchesFilters(item, filters)).slice(0, limit);
     },
@@ -788,6 +962,7 @@ export function makePgEntity(collectionName) {
         const allowed = [
           'status', 'driver_email', 'driver_name', 'driver_phone', 'driver_lat', 'driver_lng',
           'pack_progress', 'cancel_reason', 'refunded_amount', 'items',
+          'settled_at', 'delivered_at',
         ];
         const fields = [];
         const vals = [];

@@ -96,6 +96,8 @@ const NAMES = [
   'Order', 'Review', 'Promotion', 'Wallet', 'Transaction', 'DriverProfile',
   'Notification', 'AdminPromotion', 'Settlement', 'Withdrawal', 'Referral',
   'LoyaltyPoints', 'DriverIncident',
+  'LedgerTransaction', 'FinancialAuditLog', 'FloatTopUp', 'SettlementRun',
+  'MerchantFinancialConfig', 'DriverFloatAccount',
 ];
 
 export const localDb = {

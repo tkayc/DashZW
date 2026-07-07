@@ -8,7 +8,14 @@ export function createAppViteConfig(appName, port) {
   const appDir = path.join(frontendsRoot, appName);
   return {
     plugins: [react()],
-    server: { port, host: true },
+    server: {
+      port,
+      host: true,
+      proxy: {
+        '/api': { target: 'http://localhost:3001', changeOrigin: true },
+        '/uploads': { target: 'http://localhost:3001', changeOrigin: true },
+      },
+    },
     resolve: {
       alias: {
         '@': path.join(appDir, 'src'),

@@ -21,6 +21,27 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 const SOUND_URL = '/notification.mp3';
 const REPEAT_INTERVAL_MS = 8000; // ring every 8 seconds
 
+/** Fallback beep when notification.mp3 is missing */
+function playAlertBeep() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.value = 0.25;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.35);
+    osc.onended = () => ctx.close();
+  } catch {
+    // ignore
+  }
+}
+
 export function useOrderAlertSound(shouldPlay) {
   const audioRef     = useRef(null);
   const intervalRef  = useRef(null);
@@ -67,7 +88,7 @@ export function useOrderAlertSound(shouldPlay) {
     if (shouldPlay && !silenced && canPlay) {
       const playOnce = () => {
         audio.currentTime = 0;
-        audio.play().catch(() => {}); // silently fail if still blocked
+        audio.play().catch(() => playAlertBeep());
         setPlaying(true);
       };
 

@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { notifyOrderStatusChanged, notifyReplacementNeeded } from '@/api';
+import { refundToCustomerWallet, notifyReplacementNeeded } from '@/api';
 import { useOrderAlertSound } from '@/hooks/useOrderAlertSound';
 import {
   ORDER_STATUS,
@@ -93,17 +93,41 @@ export default function PartnerOrders({ shop }) {
   const advance = async (order) => {
     const next = getPartnerNext(order.status);
     if (!next) return;
-    const updated = await base44.entities.Order.update(order.id, { status: next.status });
-    notifyOrderStatusChanged({ ...order, ...updated }, next.status);
-    toast.success(`Order marked as: ${next.label.replace('Mark ', '')}`);
-    qc.invalidateQueries({ queryKey: ['partner-orders', shop?.id] });
+    try {
+      await base44.entities.Order.update(order.id, { status: next.status });
+      toast.success(`Order marked as: ${next.label.replace('Mark ', '')}`);
+      qc.invalidateQueries({ queryKey: ['partner-orders', shop?.id] });
+    } catch (err) {
+      toast.error(err?.message || 'Could not update order. Please try again.');
+      qc.invalidateQueries({ queryKey: ['partner-orders', shop?.id] });
+    }
   };
 
   const cancel = async (order) => {
     if (!confirm('Cancel this order?')) return;
-    await base44.entities.Order.update(order.id, { status: ORDER_STATUS.CANCELLED });
-    notifyOrderStatusChanged(order, ORDER_STATUS.CANCELLED);
-    qc.invalidateQueries({ queryKey: ['partner-orders', shop?.id] });
+    try {
+      const walletRefund = parseFloat(order.wallet_applied || 0);
+      if (walletRefund > 0 && order.customer_email) {
+        await refundToCustomerWallet(
+          order.customer_email,
+          walletRefund,
+          `Refund — cancelled order from ${shop?.name || order.shop_name || 'merchant'}`
+        );
+      }
+      await base44.entities.Order.update(order.id, {
+        status: ORDER_STATUS.CANCELLED,
+        cancel_reason: 'merchant',
+      });
+      qc.invalidateQueries({ queryKey: ['partner-orders', shop?.id] });
+      toast.success(
+        walletRefund > 0
+          ? `Order cancelled — $${walletRefund.toFixed(2)} refunded to customer wallet`
+          : 'Order cancelled'
+      );
+    } catch (err) {
+      toast.error(err?.message || 'Could not cancel order. Please try again.');
+      qc.invalidateQueries({ queryKey: ['partner-orders', shop?.id] });
+    }
   };
 
   const updatePackedQty = async (order, item, delta) => {
@@ -272,7 +296,7 @@ export default function PartnerOrders({ shop }) {
                       <div className="flex items-center gap-1 border border-border rounded-lg px-1 py-0.5">
                         <button
                           onClick={() => updatePackedQty(order, item, -1)}
-                          disabled={!['confirmed', 'preparing'].includes(order.status)}
+                          disabled={![ORDER_STATUS.ACCEPTED, ORDER_STATUS.PREPARING].includes(normalizeOrderStatus(order.status))}
                           className="w-5 h-5 rounded bg-muted hover:bg-muted/70 disabled:opacity-50 flex items-center justify-center"
                         >
                           <Minus className="w-3 h-3" />
@@ -282,7 +306,7 @@ export default function PartnerOrders({ shop }) {
                         </span>
                         <button
                           onClick={() => updatePackedQty(order, item, 1)}
-                          disabled={!['confirmed', 'preparing'].includes(order.status)}
+                          disabled={![ORDER_STATUS.ACCEPTED, ORDER_STATUS.PREPARING].includes(normalizeOrderStatus(order.status))}
                           className="w-5 h-5 rounded bg-muted hover:bg-muted/70 disabled:opacity-50 flex items-center justify-center"
                         >
                           <Plus className="w-3 h-3" />

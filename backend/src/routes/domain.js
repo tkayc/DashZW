@@ -7,9 +7,11 @@ import * as adminPromotions from '../services/admin/adminPromotions.js';
 import * as settlements from '../services/payments/settlements.js';
 import * as surgePricing from '../services/admin/surgePricing.js';
 import * as seedData from '../services/merchant/seedData.js';
+import * as financial from '../services/financial/index.js';
 
 const modules = {
   finance,
+  financial,
   notifications,
   orderEngine,
   adminPromotions,
@@ -22,6 +24,10 @@ const ADMIN_ONLY = new Set([
   'seedData.resetTransactionalData',
   'seedData.resetOrderData',
   'seedData.factoryReset',
+  'finance.settleOrder',
+  'financial.getFinancialDashboard',
+  'financial.getAuditLogs',
+  'financial.setMerchantSettlementFrequency',
   'settlements.settlePartnerWallet',
   'settlements.getCodReceivables',
   'settlements.getSettlements',
@@ -57,7 +63,7 @@ router.post('/invoke', authMiddleware, async (req, res) => {
     if (!mod || typeof mod[method] !== 'function') {
       return res.status(400).json({ message: `Unknown ${key}` });
     }
-    if (ADMIN_ONLY.has(key) && req.user.role !== 'admin') {
+    if (ADMIN_ONLY.has(key) && !['admin', 'super_admin'].includes(req.user.role)) {
       return res.status(403).json({ message: 'Forbidden' });
     }
     if (isCustomer(req.user) && CUSTOMER_BLOCKED.has(key)) {
@@ -116,7 +122,7 @@ router.post('/invoke', authMiddleware, async (req, res) => {
     }
 
     // Partner-only driver top-up / withdraw
-    if (key === 'finance.topUpDriver' || key === 'settlements.driverWithdraw') {
+    if (key === 'finance.topUpDriver' || key === 'settlements.driverWithdraw' || key === 'financial.topUpDriverFloat') {
       if (!['partner', 'admin', 'merchant_owner'].includes(req.user.role)) {
         return res.status(403).json({ message: 'Forbidden' });
       }
@@ -136,6 +142,7 @@ router.post('/invoke-public', async (req, res) => {
       'surgePricing.calcSurgeMultiplier',
       'adminPromotions.validateAdminCoupon',
       'adminPromotions.calcAdminPromoDiscount',
+      'financial.buildCustomerReceipt',
     ]);
     const key = `${module}.${method}`;
     if (!publicAllow.has(key)) {

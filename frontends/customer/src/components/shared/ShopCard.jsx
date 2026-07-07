@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Star, Clock, Bike } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { getShopStatus } from '@/api';
+import { getShopStatus, formatOpeningHours } from '@/api';
 import { formatUSD } from '@/lib/formatCurrency';
 
 export default function ShopCard({ shop, variant = 'default' }) {
@@ -73,7 +73,7 @@ export default function ShopCard({ shop, variant = 'default' }) {
               <>
                 <div className="flex items-center gap-1 text-muted-foreground">
                   <Clock className="w-3 h-3" />
-                  <span className="text-xs">{shop.opening_hours || 'Hours not set'}</span>
+                  <span className="text-xs">{formatOpeningHours(shop.opening_hours)}</span>
                 </div>
                 <span className="text-xs text-muted-foreground ml-auto italic">Browse menu</span>
               </>

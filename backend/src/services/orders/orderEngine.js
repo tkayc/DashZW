@@ -33,6 +33,14 @@ export async function runOrderTimeoutCheck() {
     if (age < 10 * 60 * 1000) continue;
 
     const merchantName = order.merchant_name || order.shop_name;
+
+    // Mark cancelled first so a concurrent/subsequent timeout pass can't
+    // re-enter this order and issue a duplicate refund.
+    await localDb.entities.Order.update(order.id, {
+      status: ORDER_STATUS.CANCELLED,
+      cancel_reason: 'timeout',
+    });
+
     await createNotification({
       recipient_email: order.customer_email,
       title: '❌ Order Auto-Cancelled',
@@ -40,21 +48,29 @@ export async function runOrderTimeoutCheck() {
       type: 'order_cancelled',
       link: '/orders',
     });
-    if (order.payment_method !== 'cash_on_delivery' && order.total > 0) {
-      await creditWallet(order.customer_email, 'customer', order.total,
-        `Refund — auto-cancelled order from ${merchantName}`);
+
+    // Refund the full amount the customer parted with: the charged total plus
+    // any wallet credit that was applied at checkout.
+    const refundAmount = parseFloat(
+      ((order.total || 0) + (order.wallet_applied || 0)).toFixed(2)
+    );
+    if (order.payment_method !== 'cash_on_delivery' && refundAmount > 0) {
+      await creditWallet(
+        order.customer_email,
+        'customer',
+        refundAmount,
+        `Refund — auto-cancelled order from ${merchantName}`,
+        null,
+        order.id
+      );
       await createNotification({
         recipient_email: order.customer_email,
-        title: `💰 Refund ${order.total?.toFixed(2)}`,
+        title: `💰 Refund ${refundAmount.toFixed(2)}`,
         body: `Your payment for the cancelled order has been refunded to your wallet.`,
         type: 'wallet_credited',
         link: '/profile',
       });
     }
-    await localDb.entities.Order.update(order.id, {
-      status: ORDER_STATUS.CANCELLED,
-      cancel_reason: 'timeout',
-    });
   }
 }
 
@@ -207,22 +223,9 @@ export async function placeOrder(user, payload = {}) {
     throw new Error('Invalid order total');
   }
 
-  const useWallet = payload.use_wallet !== false;
   const balance = await getBalance(user.email, 'customer');
-  const walletApplied = useWallet
-    ? parseFloat(Math.min(balance, totalBeforeWallet).toFixed(2))
-    : 0;
+  const walletApplied = parseFloat(Math.min(balance, totalBeforeWallet).toFixed(2));
   const finalTotal = parseFloat(Math.max(0, totalBeforeWallet - walletApplied).toFixed(2));
-
-  if (walletApplied > 0) {
-    await debitWallet(
-      user.email,
-      'customer',
-      walletApplied,
-      `Order payment wallet deduction — ${payload.shop_name || payload.merchant_name || 'order'}`,
-      'order_payment_wallet_deduction'
-    );
-  }
 
   const {
     total_before_wallet: _tbw,
@@ -243,7 +246,30 @@ export async function placeOrder(user, payload = {}) {
     delivery_code: orderFields.delivery_code || String(Math.floor(1000 + Math.random() * 9000)),
   });
 
-  void notifyOrderPlaced(order);
+  if (walletApplied > 0) {
+    try {
+      await debitWallet(
+        user.email,
+        'customer',
+        walletApplied,
+        `Order payment wallet deduction — ${payload.shop_name || payload.merchant_name || 'order'}`,
+        'order_payment_wallet_deduction',
+        order.id
+      );
+    } catch (err) {
+      await localDb.entities.Order.update(order.id, {
+        status: ORDER_STATUS.CANCELLED,
+        cancel_reason: 'wallet_debit_failed',
+      });
+      throw err;
+    }
+  }
+
+  try {
+    await notifyOrderPlaced(order);
+  } catch (e) {
+    console.warn('[DashZW] notifyOrderPlaced failed:', e.message);
+  }
 
   return {
     order,

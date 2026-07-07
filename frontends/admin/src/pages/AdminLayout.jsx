@@ -3,7 +3,7 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Bike, Store, ShoppingBag, LifeBuoy,
   BarChart3, Percent, Wallet, Tag, Bell, ScrollText, Activity,
-  Settings, Shield, Menu, X, LogOut, MapPin,
+  Settings, Shield, Menu, X, LogOut, MapPin, DollarSign,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/AuthContext';
@@ -23,6 +23,7 @@ const navItems = [
   { path: '/analytics', label: 'Analytics', icon: BarChart3 },
   { path: '/commissions', label: 'Commissions', icon: Percent },
   { path: '/settlements', label: 'Settlement', icon: Wallet },
+  { path: '/financial', label: 'Financial', icon: DollarSign },
   { path: '/coupons', label: 'Coupons', icon: Tag },
   { path: '/notifications', label: 'Notifications', icon: Bell },
   { path: '/audit', label: 'Audit Logs', icon: ScrollText },

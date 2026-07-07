@@ -8,13 +8,12 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { formatUSD } from '@/lib/formatCurrency';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import DeliveryMap from '@/components/map/DeliveryMap';
 import { useDriverLocation } from '@/hooks/useDriverLocation';
-import { settleOrder } from '@/api';
 import { awardPoints } from '@/api';
 import DriverSafety from '@/components/driver/DriverSafety';
-import { notifyOrderStatusChanged } from '@/api';
 import {
   ORDER_STATUS,
   ORDER_STATUS_LABELS,
@@ -215,20 +214,15 @@ export default function DriverActiveDeliveries() {
     .slice(0, 10);
 
   const updateStatus = async (order, status) => {
-    // On delivery, advance to Completed (settlement-ready terminal state)
     const persistStatus = status === ORDER_STATUS.DELIVERED ? ORDER_STATUS.COMPLETED : status;
     await base44.entities.Order.update(order.id, {
       status: persistStatus,
       ...(status === ORDER_STATUS.DELIVERED ? { delivered_at: new Date().toISOString() } : {}),
     });
-    await notifyOrderStatusChanged({ ...order, status }, status);
-    if (status === ORDER_STATUS.DELIVERED || status === ORDER_STATUS.COMPLETED) {
-      if (status === ORDER_STATUS.DELIVERED) {
-        await notifyOrderStatusChanged({ ...order, status: ORDER_STATUS.COMPLETED }, ORDER_STATUS.COMPLETED);
-      }
-      await settleOrder({ ...order, status: ORDER_STATUS.COMPLETED });
-      if (order.customer_email && order.total > 0) {
-        await awardPoints(order.customer_email, order.total);
+    if (status === ORDER_STATUS.DELIVERED) {
+      const orderTotal = order.total_before_wallet ?? (order.customer_subtotal || 0) + (order.delivery_fee || 0);
+      if (order.customer_email && orderTotal > 0) {
+        await awardPoints(order.customer_email, orderTotal);
       }
       toast.success('Order delivered! Great job 🎉');
     } else {

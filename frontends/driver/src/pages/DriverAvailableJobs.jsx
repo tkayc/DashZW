@@ -7,8 +7,7 @@ import { MapPin, Clock, DollarSign, Store, Bike, AlertTriangle, CheckCircle2, Lo
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { formatUSD } from '@/lib/formatCurrency';
-import { isDriverBlocked, canDriverAcceptOrder, calcServiceFee, useBalance } from '@/api';
-import { notifyOrderStatusChanged } from '@/api';
+import { isDriverBlocked, canDriverAcceptOrder, calcServiceFee, useBalance, canAcceptCodOrder } from '@/api';
 import {
   ORDER_STATUS,
   ORDER_STATUS_ON_DRIVER_ACCEPT,
@@ -128,6 +127,11 @@ export default function DriverAvailableJobs() {
       return;
     }
     // COD wallet check
+    const codCheck = await canAcceptCodOrder(user?.email, order).catch(() => null);
+    if (codCheck && !codCheck.ok) {
+      toast.error(codCheck.reason || 'Insufficient driver float for this COD order.');
+      return;
+    }
     const canAccept = await canDriverAcceptOrder(user?.email, order);
     if (!canAccept) {
       const _serviceFee = await calcServiceFee(order.delivery_fee || 0);
@@ -149,11 +153,6 @@ export default function DriverAvailableJobs() {
         driver_name:  user.full_name || user.email,
         status: ORDER_STATUS_ON_DRIVER_ACCEPT,
       });
-      notifyOrderStatusChanged({
-        ...order,
-        driver_email: user.email,
-        driver_name:  user.full_name || user.email,
-      }, ORDER_STATUS_ON_DRIVER_ACCEPT);
 
       if (multi.combined) {
         toast.success('Second job accepted! Deliver both orders on your route.');
@@ -162,6 +161,11 @@ export default function DriverAvailableJobs() {
       }
       qc.invalidateQueries({ queryKey: ['driver-available'] });
       qc.invalidateQueries({ queryKey: ['driver-active', user?.email] });
+    } catch (err) {
+      // Another driver may have grabbed it, or the assignment/float reservation
+      // failed server-side — surface it and refresh so stale state is cleared.
+      toast.error(err?.message || 'Could not accept job — it may have been taken. Refreshing…');
+      qc.invalidateQueries({ queryKey: ['driver-available'] });
     } finally {
       setAccepting(null);
     }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { base44, invalidateCollection } from '@/api';
 import { Save, Power } from 'lucide-react';
@@ -43,12 +43,24 @@ export default function PartnerShopProfile({ shop, onShopUpdate }) {
   const qc = useQueryClient();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({});
+  const [dirty, setDirty] = useState(false);
+  const shopIdRef = useRef(null);
 
   useEffect(() => {
-    if (shop) setForm({ ...shop });
-  }, [shop]);
+    if (!shop) return;
+    if (shopIdRef.current !== shop.id) {
+      shopIdRef.current = shop.id;
+      setForm({ ...shop });
+      setDirty(false);
+      return;
+    }
+    if (!dirty) setForm({ ...shop });
+  }, [shop, dirty]);
 
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k, v) => {
+    setDirty(true);
+    setForm((f) => ({ ...f, [k]: v }));
+  };
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -57,7 +69,9 @@ export default function PartnerShopProfile({ shop, onShopUpdate }) {
       const payload = buildProfilePayload(form);
       const updated = await base44.entities.Shop.update(shop.id, payload);
       setForm({ ...updated });
+      setDirty(false);
       invalidateCollection('Shop');
+      invalidateCollection('Branch');
       qc.invalidateQueries({ queryKey: ['partner-shop'] });
       onShopUpdate?.();
       toast.success('Business profile saved');

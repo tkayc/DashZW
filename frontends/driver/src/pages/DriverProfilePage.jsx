@@ -30,7 +30,9 @@ export default function DriverProfilePage() {
   });
 
   const balance = useBalance(user?.email, 'driver');
-  const delivered   = orders.filter(o => o.status === 'delivered');
+  // Deliveries persist as 'completed' (delivered is a transient UI state), so
+  // count both to avoid always showing 0 deliveries / $0 earned.
+  const delivered   = orders.filter(o => ['delivered', 'completed'].includes(o.status));
   const active      = orders.filter(o => !['delivered', 'cancelled', 'completed', 'refunded'].includes(o.status)).length;
   const totalEarned = delivered.reduce((s, o) => s + (o.driver_earning || 0), 0);
   const driverID    = 'DRV-' + (user?.email || '').replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 6);

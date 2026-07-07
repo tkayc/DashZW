@@ -4,40 +4,36 @@
  * Strategy:
  *  1. Shop coords are hardcoded in seed data (shop.lat, shop.lng) — no API call needed
  *  2. Customer address: uses browser Geolocation API for "use my location"
- *  3. Customer typed address: uses Nominatim (OSM) WITHOUT country suffix,
- *     so the user can type a full SA address and it resolves correctly
+ *  3. Customer typed address: resolved via the backend's /api/location/geocode
+ *     endpoint (server-side Nominatim call, cached, with SA country/city
+ *     defaults applied). We do NOT call Nominatim directly from the browser:
+ *     browsers silently strip/ignore custom User-Agent headers on fetch, and
+ *     Nominatim's usage policy disallows unidentified client-side calls —
+ *     that combination is what caused checkout to get stuck on "calculating
+ *     distance" for addresses the direct browser call couldn't resolve.
  *  4. Haversine formula for the final distance calculation
  */
+import { locationApi } from '../location.js';
 
 const cache = new Map();
 
 /**
- * Geocode any address string via Nominatim.
- * Does NOT append country — caller should include city/country in the string if needed.
+ * Geocode any address string via the backend (server-side Nominatim,
+ * cached, with default country/city applied so partial addresses like
+ * "12 Oak Ave" still resolve against South Africa / Johannesburg).
  */
 export async function geocodeAddress(address) {
   const key = address.trim().toLowerCase();
   if (cache.has(key)) return cache.get(key);
 
   try {
-    const q   = encodeURIComponent(address.trim());
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1&addressdetails=0`,
-      {
-        headers: {
-          'Accept-Language': 'en',
-          'User-Agent': 'DashZW-App/1.0',
-        },
-      }
-    );
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (!data.length) return null;
-    const coords = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    const result = await locationApi.geocode(address.trim());
+    if (result?.lat == null || result?.lng == null) return null;
+    const coords = { lat: result.lat, lng: result.lng };
     cache.set(key, coords);
     return coords;
   } catch (err) {
-    console.warn('[geocode] Nominatim failed:', err.message);
+    console.warn('[geocode] backend geocode failed:', err.message);
     return null;
   }
 }

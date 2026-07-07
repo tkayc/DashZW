@@ -10,7 +10,6 @@ import {
   ORDER_STATUS_LABELS,
   normalizeOrderStatus,
   isActiveOrderStatus,
-  isTerminalOrderStatus,
 } from '@/domain/orderStates';
 
 const statusColors = {
@@ -45,7 +44,13 @@ export default function PartnerDashboard({ shop }) {
     .filter((o) => {
       const d = new Date(o.created_date);
       const now = new Date();
-      return d.toDateString() === now.toDateString() && !isTerminalOrderStatus(o.status);
+      const status = normalizeOrderStatus(o.status);
+      // Revenue = orders actually fulfilled today (delivered/completed), not
+      // in-progress ones.
+      return (
+        d.toDateString() === now.toDateString() &&
+        [ORDER_STATUS.DELIVERED, ORDER_STATUS.COMPLETED].includes(status)
+      );
     })
     .reduce((s, o) => s + (o.total || 0), 0);
 

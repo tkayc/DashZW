@@ -12,6 +12,13 @@ import { useAuth } from '@/lib/AuthContext';
 export default function PartnerDriverTopUp() {
   const { user } = useAuth();
 
+  const [driverIdInput, setDriverIdInput] = useState('');
+  const [amount, setAmount] = useState('');
+  const [foundDriver, setFoundDriver] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const [topping, setTopping] = useState(false);
+  const [done, setDone] = useState(false);
+
   // Guard: only partners can access this
   if (!user || user.role !== 'partner') {
     return (
@@ -22,12 +29,6 @@ export default function PartnerDriverTopUp() {
       </div>
     );
   }
-  const [driverIdInput, setDriverIdInput] = useState('');
-  const [amount, setAmount] = useState('');
-  const [foundDriver, setFoundDriver] = useState(null);
-  const [searching, setSearching] = useState(false);
-  const [topping, setTopping] = useState(false);
-  const [done, setDone] = useState(false);
 
   const searchDriver = async () => {
     if (!driverIdInput.trim()) return;
@@ -73,13 +74,20 @@ export default function PartnerDriverTopUp() {
     if (!amt || amt <= 0) { toast.error('Enter a valid amount'); return; }
     if (!foundDriver) return;
     setTopping(true);
-    await new Promise(r => setTimeout(r, 400));
-    const newBalance = await topUpDriver(foundDriver.email, amt, user?.email);
-    toast.success(`${formatUSD(amt.toFixed(2))} topped up for ${foundDriver.driverId}`);
-    setFoundDriver({ ...foundDriver, balance: newBalance });
-    setAmount('');
-    setDone(true);
-    setTopping(false);
+    try {
+      await topUpDriver(foundDriver.email, amt, user?.email);
+      // topUpDriver returns a float summary object, not a number — re-read the
+      // scalar balance so the UI (foundDriver.balance.toFixed) stays valid.
+      const refreshed = await getBalance(foundDriver.email, 'driver');
+      toast.success(`${formatUSD(amt.toFixed(2))} topped up for ${foundDriver.driverId}`);
+      setFoundDriver({ ...foundDriver, balance: refreshed });
+      setAmount('');
+      setDone(true);
+    } catch (err) {
+      toast.error(err?.message || 'Top-up failed. Please try again.');
+    } finally {
+      setTopping(false);
+    }
   };
 
   return (
