@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { Loader2, Mail, Phone, Fingerprint, ChevronDown, ChevronUp } from 'lucide-react';
 import { getDemoAccountsForRole } from '@/constants/demoAccounts';
+import DashZWLogo from '@shared/components/DashZWLogo.jsx';
 
 /**
  * Customer auth entry — email/phone, social placeholders, guest, remember me.
@@ -74,8 +75,8 @@ export default function LoginPage({
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center mx-auto mb-3 shadow-lg text-2xl">
-            📦
+          <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center mx-auto mb-3 shadow-lg text-primary-foreground">
+            <DashZWLogo className="w-10 h-10" />
           </div>
           <h1 className="text-2xl font-bold text-foreground">{portalTitle}</h1>
           <p className="text-sm text-muted-foreground mt-1">{portalSubtitle}</p>

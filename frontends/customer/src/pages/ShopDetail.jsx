@@ -32,10 +32,9 @@ export default function ShopDetail() {
     enabled: !!shopId,
   });
 
-  const { data: menuItems, isLoading: menuLoading, isError: menuError, error: menuLoadError } = useQuery({
+  const { data: menuItems, isPending: menuLoading, isError: menuError, error: menuLoadError } = useQuery({
     queryKey: ['menu', shopId],
     queryFn: () => base44.entities.MenuItem.filter({ shop_id: shopId }),
-    initialData: [],
     enabled: !!shopId,
   });
 

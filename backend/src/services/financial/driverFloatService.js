@@ -5,7 +5,7 @@
 import { getLedgerBalance, postTransaction } from './ledgerService.js';
 import { getCollection } from '../../db/localDb.js';
 import { accountId, ACCOUNT_BUCKET, TX_TYPE, platformAccount } from './constants.js';
-import { insertFloatTopUp, insertAuditLog } from './repository.js';
+import { insertFloatTopUp, insertAuditLog, findIdempotency } from './repository.js';
 
 function driverAccounts(email) {
   return {
@@ -125,6 +125,15 @@ export async function reserveFloatForOrder(driverEmail, order, createdBy = 'syst
 export async function releaseFloatForOrder(driverEmail, order, createdBy = 'system') {
   const required = getRequiredFloat(order);
   const accts = driverAccounts(driverEmail);
+
+  // Only release if a reservation actually succeeded for this order. If the
+  // driver had insufficient float, reserveFloatForOrder threw and nothing
+  // was reserved — releasing anyway would debit the reserved account below
+  // zero for money that was never actually set aside.
+  const reservation = await findIdempotency(`float_reserve_${order.id}_${driverEmail}`);
+  if (!reservation) {
+    return { released: 0, skipped: 'no matching reservation found' };
+  }
 
   await postTransaction({
     transactionType: TX_TYPE.DRIVER_FLOAT_RELEASE,

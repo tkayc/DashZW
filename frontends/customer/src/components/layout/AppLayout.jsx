@@ -3,7 +3,8 @@ import { Outlet, Link, useNavigate, useLocation, useSearchParams } from 'react-r
 import BottomNav from './BottomNav';
 import FloatingCartBar from './FloatingCartBar';
 import NotificationBell from '@/components/shared/NotificationBell';
-import { UtensilsCrossed, ChevronDown, MapPin, Search, X, Check } from 'lucide-react';
+import { ChevronDown, MapPin, Search, X, Check, Package } from 'lucide-react';
+import DashZWLogo from '@shared/components/DashZWLogo.jsx';
 import { delivery as deliveryIcon } from '@assets/icons/index.js';
 import DeliveryAddressBar from '@/components/location/DeliveryAddressBar';
 import { useCart } from '@/lib/CartContext';
@@ -158,13 +159,26 @@ export default function AppLayout() {
         <div className="max-w-lg mx-auto px-4">
 
           {/* Top row: logo + bell */}
-          <div className="flex items-center justify-between py-2.5">
-            <Link to="/" className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
-                <UtensilsCrossed className="w-3.5 h-3.5 text-primary-foreground" />
-              </div>
-              <span className="font-bold text-foreground text-sm">DashZW</span>
-            </Link>
+          <div className="flex items-center justify-between py-2.5 gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <Link to="/" className="flex items-center gap-2 shrink-0">
+                <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center text-primary-foreground">
+                  <DashZWLogo className="w-4 h-4" />
+                </div>
+                <span className="font-bold text-foreground text-sm">DashZW</span>
+              </Link>
+              <Link
+                to="/courier"
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold border transition-colors shrink-0 ${
+                  location.pathname === '/courier'
+                    ? 'bg-foreground text-background border-foreground'
+                    : 'bg-muted/60 text-foreground border-border hover:bg-muted'
+                }`}
+              >
+                <Package className="w-3.5 h-3.5" />
+                Courier
+              </Link>
+            </div>
             <NotificationBell />
           </div>
 

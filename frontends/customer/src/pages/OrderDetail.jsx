@@ -2,14 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { formatUSD, formatUSDSigned } from '@/lib/formatCurrency';
 import { base44 } from '@/api';
 import { useRealtimeQuery as useQuery } from '@/api';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, Clock, Package, Truck, MapPin, Phone, X, RotateCcw, MessageCircle, Camera, Navigation } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { locationApi } from '@/api/location';
 import PlatformMap from '@location/components/PlatformMap.jsx';
-import ReviewModal from '@/components/reviews/ReviewModal';
+import InlineStarRating from '@/components/reviews/InlineStarRating';
 import OrderChat from '@/components/chat/OrderChat';
 import { calcAccurateETA, getTrafficLabel } from '@/api';
 import { notifyOrderStatusChanged, notifyReplacementResolved } from '@/api';
@@ -21,7 +21,7 @@ import {
   isTerminalOrderStatus,
 } from '@/domain/orderStates';
 
-const statusSteps = [
+const merchantStatusSteps = [
   { key: ORDER_STATUS.PENDING_ACCEPTANCE, label: 'Pending Acceptance', icon: Clock },
   { key: ORDER_STATUS.ACCEPTED, label: 'Accepted', icon: CheckCircle2 },
   { key: ORDER_STATUS.PREPARING, label: 'Preparing', icon: Package },
@@ -32,6 +32,32 @@ const statusSteps = [
   { key: ORDER_STATUS.DELIVERED, label: 'Delivered', icon: CheckCircle2 },
   { key: ORDER_STATUS.COMPLETED, label: 'Completed', icon: CheckCircle2 },
 ];
+
+/** Slim courier timeline — Accepted → Picked up → In transit → Delivered */
+const courierStatusSteps = [
+  { key: 'accepted', label: 'Accepted', icon: CheckCircle2, statuses: [ORDER_STATUS.READY_FOR_PICKUP, ORDER_STATUS.DRIVER_ASSIGNED] },
+  { key: 'picked_up', label: 'Picked up', icon: Package, statuses: [ORDER_STATUS.PICKED_UP] },
+  { key: 'in_transit', label: 'In transit', icon: Truck, statuses: [ORDER_STATUS.IN_TRANSIT] },
+  { key: 'delivered', label: 'Delivered', icon: CheckCircle2, statuses: [ORDER_STATUS.DELIVERED, ORDER_STATUS.COMPLETED] },
+];
+
+function courierStepIndex(status) {
+  const idx = courierStatusSteps.findIndex((s) => s.statuses.includes(status));
+  if (idx >= 0) return idx;
+  if (status === ORDER_STATUS.CANCELLED || status === ORDER_STATUS.REFUNDED) return -1;
+  return 0;
+}
+
+function isCourierOrder(order) {
+  if (!order) return false;
+  return (
+    order.order_kind === 'courier' ||
+    order.merchant_category === 'courier' ||
+    String(order.special_notes || '').startsWith('COURIER|') ||
+    order.shop_id === 'courier_platform' ||
+    order.merchant_id === 'courier_platform'
+  );
+}
 
 const statusColors = {
   [ORDER_STATUS.PENDING_ACCEPTANCE]: 'bg-secondary text-secondary-foreground',
@@ -77,19 +103,8 @@ function recalcOrderTotals(order, items) {
 export default function OrderDetail() {
   const { id: orderId } = useParams();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const [showReview, setShowReview] = useState(false);
-  const [reviewTarget, setReviewTarget] = useState('merchant');
   const [showChat, setShowChat]     = useState(false);
   const [reviewed, setReviewed] = useState(false);
-
-  useEffect(() => {
-    const rate = searchParams.get('rate');
-    if (rate === 'merchant' || rate === 'driver') {
-      setReviewTarget(rate);
-      setShowReview(true);
-    }
-  }, [searchParams]);
 
   const [tracking, setTracking] = useState(null);
 
@@ -108,7 +123,6 @@ export default function OrderDetail() {
       return orders[0];
     },
     enabled: !!orderId,
-    refetchInterval: 3000,
   });
 
   // Check if driver has another active order (multi-delivery) to show on map
@@ -159,13 +173,196 @@ export default function OrderDetail() {
   }
 
   const status = normalizeOrderStatus(order.status);
-  const currentStepIndex = statusSteps.findIndex(s => s.key === status);
+  const isCourier = isCourierOrder(order);
+  const statusSteps = isCourier ? courierStatusSteps : merchantStatusSteps;
+  const currentStepIndex = isCourier
+    ? courierStepIndex(status)
+    : statusSteps.findIndex((s) => s.key === status);
   const normalizedItems = normalizeItems(order.items);
   const packProgress = order.pack_progress || {
     packed_units: normalizedItems.reduce((sum, i) => sum + (i.packed_quantity || 0), 0),
     total_units: normalizedItems.reduce((sum, i) => sum + (i.quantity || 0), 0),
   };
   const pendingAdjustments = (order.adjustment_requests || []).filter(r => r.status === 'pending');
+
+  // ── Slim courier tracking page ────────────────────────────────────────────
+  if (isCourier) {
+    const vehicle = (order.required_vehicle_type || order.pack_progress?.courier_meta?.required_vehicle_type || 'motorbike')
+      .replace(/_/g, ' ');
+    const packageLabel =
+      order.package_description ||
+      order.pack_progress?.courier_meta?.package_description ||
+      order.items?.[0]?.name ||
+      'Package';
+    const pickupLine = order.pickup_address || order.shop_address || 'Pickup';
+    const dropoffLine = [order.delivery_address, order.delivery_city].filter(Boolean).join(', ');
+    const courierLabel =
+      currentStepIndex >= 0
+        ? courierStatusSteps[currentStepIndex].label
+        : (ORDER_STATUS_LABELS[status] || status);
+    const showMap = [
+      ORDER_STATUS.READY_FOR_PICKUP,
+      ORDER_STATUS.DRIVER_ASSIGNED,
+      ORDER_STATUS.PICKED_UP,
+      ORDER_STATUS.IN_TRANSIT,
+    ].includes(status);
+    const showCode = showMap && !!order.delivery_code;
+
+    return (
+      <div className="px-4 pt-6 pb-8 max-w-lg mx-auto">
+        <div className="flex items-center gap-3 mb-5">
+          <button
+            type="button"
+            onClick={() => navigate('/orders')}
+            className="w-9 h-9 rounded-full bg-muted flex items-center justify-center"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl font-bold text-foreground">Courier</h1>
+            <p className="text-xs text-muted-foreground truncate">
+              #{order.id?.slice(-8)} · {vehicle}
+            </p>
+          </div>
+          <Badge className={`${statusColors[status] || 'bg-primary/15 text-primary'} px-3 py-1 text-xs font-semibold rounded-xl capitalize`}>
+            {courierLabel}
+          </Badge>
+        </div>
+
+        {/* Timeline — 4 steps only */}
+        {status !== ORDER_STATUS.CANCELLED && status !== ORDER_STATUS.REFUNDED && (
+          <div className="bg-card rounded-2xl p-4 border border-border/50 mb-4">
+            <div className="space-y-3">
+              {courierStatusSteps.map((step, idx) => {
+                const isCompleted = currentStepIndex >= 0 && idx <= currentStepIndex;
+                const isCurrent = idx === currentStepIndex;
+                const StepIcon = step.icon;
+                return (
+                  <div key={step.key} className="flex items-center gap-3">
+                    <div
+                      className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                        isCompleted ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                      }`}
+                    >
+                      <StepIcon className="w-4 h-4" />
+                    </div>
+                    <span
+                      className={`text-sm ${
+                        isCurrent
+                          ? 'font-bold text-foreground'
+                          : isCompleted
+                            ? 'font-medium text-foreground'
+                            : 'text-muted-foreground'
+                      }`}
+                    >
+                      {step.label}
+                    </span>
+                    {isCurrent && <div className="w-2 h-2 rounded-full bg-primary animate-pulse ml-auto" />}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Delivery code */}
+        {showCode && (
+          <div className="bg-primary rounded-2xl p-5 text-primary-foreground text-center mb-4">
+            <p className="text-sm font-medium opacity-80 mb-1">Delivery code</p>
+            <p className="text-5xl font-bold tracking-widest">{order.delivery_code}</p>
+            <p className="text-xs opacity-70 mt-2">Share with the recipient at drop-off</p>
+          </div>
+        )}
+
+        {/* Map */}
+        {showMap && (
+          <div className="mb-4">
+            <PlatformMap
+              height={240}
+              merchant={{
+                lat: order.pickup_lat || order.shop_lat,
+                lng: order.pickup_lng || order.shop_lng,
+                label: 'Pickup',
+              }}
+              customer={
+                order.dest_lat
+                  ? { lat: order.dest_lat, lng: order.dest_lng, label: 'Drop-off' }
+                  : null
+              }
+              driver={
+                order.driver_lat
+                  ? { lat: order.driver_lat, lng: order.driver_lng, label: order.driver_name || 'Courier' }
+                  : null
+              }
+              route={tracking?.routes?.[0]?.polyline || []}
+            />
+            <p className="text-xs text-muted-foreground mt-2">
+              {order.driver_name
+                ? `${order.driver_name} · ${courierLabel}`
+                : 'Waiting for a courier…'}
+              {tracking?.eta_mins != null ? ` · ETA ~${tracking.eta_mins} min` : ''}
+            </p>
+            {order.driver_phone && (
+              <a
+                href={`tel:${order.driver_phone}`}
+                className="inline-flex items-center gap-1.5 mt-2 text-xs font-semibold text-primary"
+              >
+                <Phone className="w-3.5 h-3.5" /> Call courier
+              </a>
+            )}
+          </div>
+        )}
+
+        {/* Essentials only */}
+        <div className="bg-card rounded-2xl p-4 border border-border/50 space-y-3">
+          <div className="flex items-start gap-2 text-sm">
+            <MapPin className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase">Pickup</p>
+              <p className="text-foreground">{pickupLine}</p>
+            </div>
+          </div>
+          <div className="flex items-start gap-2 text-sm">
+            <MapPin className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+            <div>
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase">Drop-off</p>
+              <p className="text-foreground">{dropoffLine || '—'}</p>
+            </div>
+          </div>
+          <Separator />
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Package</span>
+            <span className="font-medium text-foreground text-right max-w-[60%]">{packageLabel}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Vehicle</span>
+            <span className="font-medium capitalize">{vehicle}</span>
+          </div>
+          <div className="flex justify-between text-sm font-bold">
+            <span>Courier fee</span>
+            <span>
+              {formatUSD(
+                (order.delivery_fee || 0) > 0
+                  ? order.delivery_fee
+                  : (order.total || 0) + (order.wallet_applied || 0)
+              )}
+            </span>
+          </div>
+        </div>
+
+        {(status === ORDER_STATUS.DELIVERED || status === ORDER_STATUS.COMPLETED) && (
+          <div className="mt-4">
+            <InlineStarRating
+              order={order}
+              label="Rate courier"
+              alreadyRated={reviewed || !!existingReview}
+              onSubmitted={() => setReviewed(true)}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const resolveReplacement = async (request, option) => {
     const items = normalizeItems(order.items);
@@ -309,9 +506,13 @@ export default function OrderDetail() {
                   <p className="text-xs text-muted-foreground">Arriving by {eta.etaTime}</p>
                 </div>
               </div>
-              <span className={`text-xs font-semibold ${eta.traffic.color}`}>{eta.traffic.emoji} {eta.traffic.label}</span>
+              {eta.traffic && (
+                <span className={`text-xs font-semibold ${eta.traffic.color || ''}`}>
+                  {eta.traffic.emoji} {eta.traffic.label}
+                </span>
+              )}
             </div>
-            {(eta.breakdown.prep > 0 || eta.breakdown.travel > 0) && (
+            {(eta.breakdown?.prep > 0 || eta.breakdown?.travel > 0) && (
               <div className="flex gap-3 mt-1">
                 {eta.breakdown.prep > 0 && <span className="text-[10px] text-muted-foreground bg-muted/50 rounded px-2 py-1">🍳 Prep ~{eta.breakdown.prep}m</span>}
                 <span className="text-[10px] text-muted-foreground bg-muted/50 rounded px-2 py-1">🛵 Travel ~{eta.breakdown.travel}m</span>
@@ -347,9 +548,11 @@ export default function OrderDetail() {
         );
       })()}
 
-      {/* Merchant status */}
+      {/* Status summary */}
       <div className="bg-card rounded-2xl p-4 border border-border/50 mb-4">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Merchant status</p>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+          Merchant status
+        </p>
         <p className="text-sm font-semibold text-foreground">
           {ORDER_STATUS_LABELS[status] || status}
         </p>
@@ -362,7 +565,9 @@ export default function OrderDetail() {
       {/* Order Timeline */}
       {status !== ORDER_STATUS.CANCELLED && status !== ORDER_STATUS.REFUNDED && (
         <div className="bg-card rounded-2xl p-4 border border-border/50 mb-4">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Order timeline</p>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+            Order timeline
+          </p>
           <div className="space-y-3">
             {statusSteps.map((step, idx) => {
               const isCompleted = idx <= currentStepIndex;
@@ -390,13 +595,15 @@ export default function OrderDetail() {
         </div>
       )}
 
-      {/* Driver tracking placeholder + live map */}
+      {/* Driver tracking + live map */}
       {[ORDER_STATUS.PICKED_UP, ORDER_STATUS.IN_TRANSIT, ORDER_STATUS.DRIVER_ASSIGNED].includes(status) && (
         <div className="mb-4">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Driver tracking</p>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Driver tracking
+            </p>
             <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-              <Navigation className="w-3 h-3" /> Live map placeholder
+              <Navigation className="w-3 h-3" /> Live map
             </span>
           </div>
           {siblingOrder && (
@@ -421,10 +628,12 @@ export default function OrderDetail() {
           {order.driver_phone && (
             <div className="flex gap-2 mt-2">
               <Button variant="outline" size="sm" className="rounded-xl flex-1" asChild>
-                <a href={`tel:${order.driver_phone}`}><Phone className="w-3.5 h-3.5 mr-1" /> Call driver</a>
+                <a href={`tel:${order.driver_phone}`}>
+                  <Phone className="w-3.5 h-3.5 mr-1" /> Call driver
+                </a>
               </Button>
               <Button variant="outline" size="sm" className="rounded-xl flex-1" onClick={() => setShowChat(true)}>
-                <MessageCircle className="w-3.5 h-3.5 mr-1" /> Chat (placeholder)
+                <MessageCircle className="w-3.5 h-3.5 mr-1" /> Chat
               </Button>
             </div>
           )}
@@ -477,7 +686,7 @@ export default function OrderDetail() {
             <span className="text-muted-foreground">Delivery
               {order.distance_km ? ` (${order.distance_km.toFixed(1)} km)` : ''}
             </span>
-            <span>{order.delivery_fee ? `${formatUSD(order.delivery_fee.toFixed(2))}` : 'Free'}</span>
+            <span>{order.delivery_fee ? formatUSD(order.delivery_fee) : 'Free'}</span>
           </div>
           {order.discount_amount > 0 && (
             <div className="flex justify-between text-sm text-green-600">
@@ -494,17 +703,21 @@ export default function OrderDetail() {
       </div>
 
       {/* Delivery Info */}
-      <div className="bg-card rounded-2xl p-4 border border-border/50">
+      <div className="bg-card rounded-2xl p-4 border border-border/50 mb-4">
         <h3 className="font-semibold text-foreground mb-3">Delivery Info</h3>
         <div className="space-y-2">
           <div className="flex items-start gap-2 text-sm">
             <MapPin className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
-            <span className="text-muted-foreground">{order.delivery_address}, {order.delivery_city}</span>
+            <span className="text-muted-foreground">
+              {order.delivery_address}{order.delivery_city ? `, ${order.delivery_city}` : ''}
+            </span>
           </div>
-          <div className="flex items-center gap-2 text-sm">
-            <Phone className="w-4 h-4 text-muted-foreground shrink-0" />
-            <span className="text-muted-foreground">{order.customer_phone}</span>
-          </div>
+          {order.customer_phone && (
+            <div className="flex items-center gap-2 text-sm">
+              <Phone className="w-4 h-4 text-muted-foreground shrink-0" />
+              <span className="text-muted-foreground">{order.customer_phone}</span>
+            </div>
+          )}
           {order.driver_name && (
             <div className="mt-3 p-3 bg-primary/5 rounded-xl space-y-2">
               <p className="text-xs text-muted-foreground">Driver information</p>
@@ -529,7 +742,7 @@ export default function OrderDetail() {
         </div>
       </div>
 
-      {/* Delivery OTP placeholder */}
+      {/* Delivery OTP */}
       {[ORDER_STATUS.IN_TRANSIT, ORDER_STATUS.PICKED_UP, ORDER_STATUS.DRIVER_ASSIGNED].includes(status) && (
         <div className="bg-primary rounded-2xl p-5 text-primary-foreground text-center mb-4">
           <p className="text-sm font-medium opacity-80 mb-1">Delivery OTP</p>
@@ -594,24 +807,13 @@ export default function OrderDetail() {
             {/* TODO(backend): PDF receipt download */}
           </div>
 
-          <div className="bg-card rounded-2xl border border-border/50 p-4 space-y-3">
-            <p className="font-semibold text-sm text-foreground">Rate your experience</p>
-            <div className="grid grid-cols-3 gap-2">
-              {['Merchant', 'Driver', 'Products'].map((label) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={() => setShowReview(true)}
-                  className="py-3 rounded-xl bg-muted/60 text-xs font-semibold text-foreground hover:bg-muted"
-                >
-                  ⭐ {label}
-                </button>
-              ))}
-            </div>
-            {(reviewed || existingReview) && (
-              <p className="text-xs text-primary font-medium text-center">Thanks for your feedback!</p>
-            )}
-            {/* TODO(postgresql): Separate merchant_rating, driver_rating, product_ratings tables */}
+          <div className="mt-1">
+            <InlineStarRating
+              order={order}
+              label="Rate your experience"
+              alreadyRated={reviewed || !!existingReview}
+              onSubmitted={() => setReviewed(true)}
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-2">
@@ -661,14 +863,6 @@ export default function OrderDetail() {
             {/* TODO(payments): Post-delivery tip charge */}
           </div>
         </div>
-      )}
-
-      {showReview && (
-        <ReviewModal
-          order={order}
-          onClose={() => setShowReview(false)}
-          onSubmitted={() => { setShowReview(false); setReviewed(true); }}
-        />
       )}
 
       {showChat && (

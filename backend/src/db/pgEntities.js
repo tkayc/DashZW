@@ -358,19 +358,47 @@ function branchToApi(row) {
 
 function orderToApi(row) {
   if (!row) return null;
+  const pack =
+    typeof row.pack_progress === 'string'
+      ? JSON.parse(row.pack_progress || '{}')
+      : (row.pack_progress || {});
+  const courierMeta = pack?.courier_meta || {};
   return {
     ...row,
     partner_subtotal: num(row.partner_subtotal),
     platform_fee: num(row.platform_fee),
     customer_subtotal: num(row.customer_subtotal),
     delivery_fee: num(row.delivery_fee),
+    raw_delivery_fee: num(row.raw_delivery_fee),
+    service_fee: num(row.service_fee),
+    discount_amount: num(row.discount_amount),
+    admin_discount_amount: num(row.admin_discount_amount),
     total: num(row.total),
     wallet_applied: num(row.wallet_applied),
     driver_tip: num(row.driver_tip),
-    discount_amount: num(row.discount_amount),
+    partner_payout: num(row.partner_payout),
+    platform_earning: num(row.platform_earning),
+    driver_earning: num(row.driver_earning),
+    refunded_amount: num(row.refunded_amount),
+    distance_km: row.distance_km != null ? Number(row.distance_km) : null,
+    estimated_arrival_mins: row.estimated_arrival_mins != null ? Number(row.estimated_arrival_mins) : null,
+    shop_lat: row.shop_lat != null ? Number(row.shop_lat) : null,
+    shop_lng: row.shop_lng != null ? Number(row.shop_lng) : null,
+    dest_lat: row.dest_lat != null ? Number(row.dest_lat) : null,
+    dest_lng: row.dest_lng != null ? Number(row.dest_lng) : null,
+    driver_lat: row.driver_lat != null ? Number(row.driver_lat) : null,
+    driver_lng: row.driver_lng != null ? Number(row.driver_lng) : null,
     created_date: row.created_at,
     updated_date: row.updated_at,
     items: typeof row.items_json === 'string' ? JSON.parse(row.items_json) : (row.items_json || row.items || []),
+    // Courier fields stored in pack_progress.courier_meta (no dedicated PG columns yet)
+    order_kind: courierMeta.order_kind || row.order_kind || (row.merchant_category === 'courier' ? 'courier' : undefined),
+    required_vehicle_type: courierMeta.required_vehicle_type || row.required_vehicle_type || null,
+    package_description: courierMeta.package_description || row.package_description || null,
+    pickup_address: courierMeta.pickup_address || row.pickup_address || row.shop_address || null,
+    pickup_lat: courierMeta.pickup_lat ?? row.pickup_lat ?? (row.shop_lat != null ? Number(row.shop_lat) : null),
+    pickup_lng: courierMeta.pickup_lng ?? row.pickup_lng ?? (row.shop_lng != null ? Number(row.shop_lng) : null),
+    pack_progress: pack,
   };
 }
 
@@ -585,12 +613,70 @@ async function filterProductsSql(filters, sortKey, limit) {
   );
 }
 
+async function filterOrdersSql(filters, sortKey, limit) {
+  const conditions = [];
+  const vals = [];
+  let i = 1;
+
+  if (filters.id) {
+    conditions.push(`id = $${i++}`);
+    vals.push(filters.id);
+  }
+  const shopId = filters.shop_id || filters.merchant_id;
+  if (shopId) {
+    conditions.push(`shop_id = $${i++}`);
+    vals.push(shopId);
+  }
+  if (filters.partner_email) {
+    conditions.push(`LOWER(partner_email::text) = LOWER($${i++})`);
+    vals.push(filters.partner_email);
+  }
+  if (filters.customer_email) {
+    conditions.push(`LOWER(customer_email::text) = LOWER($${i++})`);
+    vals.push(filters.customer_email);
+  }
+  if (filters.driver_email) {
+    conditions.push(`LOWER(driver_email::text) = LOWER($${i++})`);
+    vals.push(filters.driver_email);
+  }
+  if (filters.status) {
+    conditions.push(`status = $${i++}`);
+    vals.push(filters.status);
+  }
+
+  const orderKey = sortKey?.startsWith('-') ? sortKey.slice(1) : sortKey;
+  const orderCol = { created_date: 'created_at', updated_date: 'updated_at' }[orderKey] || orderKey || 'created_at';
+  const desc = sortKey?.startsWith('-') !== false;
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const r = await query(
+    `SELECT * FROM orders ${where} ORDER BY ${orderCol} ${desc ? 'DESC' : 'ASC'} NULLS LAST LIMIT $${i}`,
+    [...vals, limit]
+  );
+  const itemsByOrder = await loadOrderItemsBatch(r.rows.map((row) => row.id));
+  return r.rows.map((row) =>
+    orderToApi({ ...row, items_json: itemsByOrder.get(row.id) || [] })
+  );
+}
+
 function canUseMerchantSqlFilter(filters) {
   return Boolean(filters.id || filters.owner_email || filters.approval_status || filters.category || filters.category_id);
 }
 
 function canUseProductSqlFilter(filters) {
   return Boolean(filters.id || filters.shop_id || filters.merchant_id || filters.is_available !== undefined);
+}
+
+function canUseOrderSqlFilter(filters) {
+  return Boolean(
+    filters.id ||
+    filters.shop_id ||
+    filters.merchant_id ||
+    filters.partner_email ||
+    filters.customer_email ||
+    filters.driver_email ||
+    filters.status
+  );
 }
 
 export function makePgEntity(collectionName) {
@@ -604,6 +690,9 @@ export function makePgEntity(collectionName) {
       }
       if ((collectionName === 'MenuItem' || collectionName === 'Product') && canUseProductSqlFilter(filters)) {
         return filterProductsSql(filters, sortKey, limit);
+      }
+      if (collectionName === 'Order' && canUseOrderSqlFilter(filters)) {
+        return filterOrdersSql(filters, sortKey, limit);
       }
       const all = await fetchAll(collectionName, sortKey, Math.max(limit, 500));
       return all.filter((item) => matchesFilters(item, filters)).slice(0, limit);
@@ -741,7 +830,21 @@ export function makePgEntity(collectionName) {
             data.admin_promo_title || null,
             data.driver_email || null,
             data.driver_name || null,
-            JSON.stringify(data.pack_progress || {}),
+            JSON.stringify(
+              data.order_kind === 'courier'
+                ? {
+                    ...(typeof data.pack_progress === 'object' && data.pack_progress ? data.pack_progress : {}),
+                    courier_meta: {
+                      order_kind: 'courier',
+                      required_vehicle_type: data.required_vehicle_type || null,
+                      package_description: data.package_description || data.special_notes || null,
+                      pickup_address: data.pickup_address || data.shop_address || null,
+                      pickup_lat: data.pickup_lat ?? data.shop_lat ?? null,
+                      pickup_lng: data.pickup_lng ?? data.shop_lng ?? null,
+                    },
+                  }
+                : (data.pack_progress || {})
+            ),
             data.scheduled_time || null,
             !!data.is_scheduled,
           ]
@@ -1094,7 +1197,6 @@ export function makePgEntity(collectionName) {
         await query(`DELETE FROM order_items WHERE order_id = $1`, [id]);
       }
       await query(`DELETE FROM ${meta.table} WHERE id = $1`, [id]);
-      if (collectionName === 'Notification') notifyListeners('Notification');
       return { id };
     },
   };

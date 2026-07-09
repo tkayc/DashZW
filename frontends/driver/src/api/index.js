@@ -20,6 +20,7 @@ export * from './domain/settlements.js';
 export * from './domain/surgePricing.js';
 export * from './domain/orderEngine.js';
 export * from './domain/financial.js';
+export * from './domain/driverOnboarding.js';
 export * from './pure/geocode.js';
 export * from './pure/shopHours.js';
 export * from './pure/etaEngine.js';

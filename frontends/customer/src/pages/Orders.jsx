@@ -164,7 +164,9 @@ export default function Orders() {
                     <div className="flex items-center gap-2">
                       <Store className="w-4 h-4 text-muted-foreground shrink-0" />
                       <p className="font-semibold text-sm truncate">
-                        {order.merchant_name || order.shop_name}
+                        {order.order_kind === 'courier'
+                          ? `Courier · ${(order.required_vehicle_type || 'package').replace(/_/g, ' ')}`
+                          : (order.merchant_name || order.shop_name)}
                       </p>
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
@@ -174,7 +176,9 @@ export default function Orders() {
                         : ''}
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {order.items?.length || 0} items · {formatUSD((order.total || 0))}
+                      {order.order_kind === 'courier'
+                        ? `${order.package_description || order.special_notes || 'Package'} · ${formatUSD(order.total || 0)}`
+                        : `${order.items?.length || 0} items · ${formatUSD((order.total || 0))}`}
                     </p>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">

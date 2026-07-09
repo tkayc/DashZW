@@ -109,11 +109,23 @@ export function calcAccurateETA(order) {
 
   const mins = Math.round(remainingMins);
   const eta = new Date(Date.now() + mins * 60 * 1000);
+  const traffic = getTrafficLabel();
+  const isEnRoute =
+    status === ORDER_STATUS.IN_TRANSIT || status === ORDER_STATUS.PICKED_UP;
+
   return {
     mins,
     eta,
     label: mins < 2 ? 'Arriving now' : `~${mins} min`,
+    etaTime: eta.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     prepMin,
     travelMin,
+    breakdown: {
+      prep: isEnRoute ? 0 : prepMin,
+      travel: travelMin,
+      handoff: isEnRoute ? 0 : handoff,
+    },
+    traffic,
+    speedKmh,
   };
 }

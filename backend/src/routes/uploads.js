@@ -1,6 +1,10 @@
 import { Router } from 'express';
-import { authMiddleware } from '../services/authentication/middleware.js';
-import { saveProductImageFromDataUrl, isExternalImageUrl } from '../services/storage/storage.js';
+import { authMiddleware, optionalAuth } from '../services/authentication/middleware.js';
+import {
+  saveProductImageFromDataUrl,
+  saveDriverDocumentFromDataUrl,
+  isExternalImageUrl,
+} from '../services/storage/storage.js';
 
 const router = Router();
 
@@ -28,6 +32,34 @@ router.post('/product-image', authMiddleware, (req, res) => {
   try {
     const savedUrl = saveProductImageFromDataUrl(dataUrl, filename);
     return res.json({ url: savedUrl, storage: 'local' });
+  } catch (err) {
+    return res.status(400).json({ message: err.message || 'Upload failed' });
+  }
+});
+
+/**
+ * Driver document upload — allowed during signup (optionalAuth) or when logged in as driver/admin.
+ * POST { dataUrl, docType, filename? } → { url }
+ */
+router.post('/driver-document', optionalAuth, (req, res) => {
+  const role = req.user?.role;
+  const allowed =
+    !req.user ||
+    role === 'driver' ||
+    role === 'admin' ||
+    role === 'super_admin';
+  if (!allowed) {
+    return res.status(403).json({ message: 'Only drivers can upload onboarding documents' });
+  }
+
+  const { dataUrl, docType, filename } = req.body || {};
+  if (!dataUrl || typeof dataUrl !== 'string') {
+    return res.status(400).json({ message: 'dataUrl (base64 image) is required' });
+  }
+
+  try {
+    const savedUrl = saveDriverDocumentFromDataUrl(dataUrl, docType || 'document', filename);
+    return res.json({ url: savedUrl, storage: 'local', docType: docType || 'document' });
   } catch (err) {
     return res.status(400).json({ message: err.message || 'Upload failed' });
   }

@@ -2,7 +2,7 @@
  * Entity store — PostgreSQL when DATABASE_URL is set, otherwise JSON files.
  * Entities are resolved per-call so dotenv can load before first use.
  */
-import { getCollection, saveCollection, subscribeToDbChanges } from './store.js';
+import { getCollection, saveCollection, subscribeToDbChanges, notifyListeners } from './store.js';
 import { isPostgresEnabled } from './pg.js';
 import { makePgEntity, hasPgEntity } from './pgEntities.js';
 
@@ -71,9 +71,29 @@ function makeJsonEntity(collectionName) {
   };
 }
 
+/**
+ * Wrap a PostgreSQL entity so every successful write broadcasts a realtime
+ * change event for its collection — mirroring the JSON store's
+ * saveCollection() → notifyListeners() behavior so all apps stay in sync.
+ */
+function withRealtimeNotify(collectionName, entity) {
+  const wrap = (fn) =>
+    async (...args) => {
+      const result = await fn(...args);
+      notifyListeners(collectionName);
+      return result;
+    };
+  return {
+    ...entity,
+    create: wrap(entity.create),
+    update: wrap(entity.update),
+    delete: wrap(entity.delete),
+  };
+}
+
 function resolveEntity(collectionName) {
   if (isPostgresEnabled() && hasPgEntity(collectionName)) {
-    return makePgEntity(collectionName);
+    return withRealtimeNotify(collectionName, makePgEntity(collectionName));
   }
   return makeJsonEntity(collectionName);
 }

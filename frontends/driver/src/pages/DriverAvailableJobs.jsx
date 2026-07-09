@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRealtimeQuery as useQuery } from '@/api';
 import { base44 } from '@/api';
@@ -16,6 +17,8 @@ import {
 } from '@/domain/orderStates';
 import { useOrderAlertSound } from '@/hooks/useOrderAlertSound';
 import { haversineKm } from '@/api';
+import { canDriverFulfillVehicle, normalizeCourierVehicle } from '@/domain/courierVehicles';
+import { assertDriverCanAcceptJobs } from '@/api/domain/driverOnboarding';
 
 const PAYMENT_LABELS = {
   ecocash: 'EcoCash', onemoney: 'OneMoney', innbucks: 'InnBucks', cash_on_delivery: 'Cash on Delivery',
@@ -100,9 +103,39 @@ export default function DriverAvailableJobs() {
     refetchInterval: 5000,
   });
 
-  const unassigned = available.filter(
-    (o) => !o.driver_email && !o.is_pickup && !rejectedIds.has(o.id)
-  );
+  const { data: driverProfile } = useQuery({
+    queryKey: ['driver-profile', user?.email],
+    queryFn: async () => {
+      const rows = await base44.entities.DriverProfile.filter({ email: user.email });
+      return rows[0] || null;
+    },
+    enabled: !!user?.email,
+  });
+
+  const driverVehicle = normalizeCourierVehicle(driverProfile?.vehicle_type) || 'motorbike';
+  const meta = driverProfile?.metadata || {};
+  const verificationStatus = meta.verification_status || driverProfile?.verification_status || 'approved';
+  const quizPassed = meta.quiz_passed ?? driverProfile?.quiz_passed ?? true;
+  const accountActive = verificationStatus === 'approved' && quizPassed;
+
+  const unassigned = available.filter((o) => {
+    if (o.driver_email || o.is_pickup || rejectedIds.has(o.id)) return false;
+    if (!accountActive) return false;
+    const isCourier =
+      o.order_kind === 'courier' ||
+      o.merchant_category === 'courier' ||
+      String(o.special_notes || '').startsWith('COURIER|');
+    const requiredVehicle =
+      o.required_vehicle_type ||
+      o.pack_progress?.courier_meta?.required_vehicle_type ||
+      (String(o.special_notes || '').startsWith('COURIER|')
+        ? String(o.special_notes).split('|')[1]
+        : null);
+    if (isCourier && requiredVehicle) {
+      return canDriverFulfillVehicle(driverVehicle, requiredVehicle);
+    }
+    return true;
+  });
   const [blocked, setBlocked] = useState(false);
   const balance = useBalance(user?.email, 'driver');
   const activeOrders = myOrders.filter(o => !isTerminalOrderStatus(o.status));
@@ -124,6 +157,12 @@ export default function DriverAvailableJobs() {
     // Hard block check
     if (blocked) {
       toast.error('Account blocked — top up your wallet at a partner shop.');
+      return;
+    }
+    try {
+      await assertDriverCanAcceptJobs();
+    } catch (e) {
+      toast.error(e.message || 'Complete onboarding before accepting jobs');
       return;
     }
     // COD wallet check
@@ -156,6 +195,8 @@ export default function DriverAvailableJobs() {
 
       if (multi.combined) {
         toast.success('Second job accepted! Deliver both orders on your route.');
+      } else if (order.order_kind === 'courier') {
+        toast.success('Courier job accepted! Head to the pickup point.');
       } else {
         toast.success('Job accepted! Head to the merchant.');
       }
@@ -229,6 +270,26 @@ export default function DriverAvailableJobs() {
           {blocked ? 'Blocked' : activeOrders.length >= 2 ? 'Full (2/2)' : 'Online'}
         </div>
       </div>
+
+      {!accountActive && (
+        <div className="flex items-start gap-3 p-4 rounded-2xl bg-amber-50 border border-amber-200">
+          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-amber-600" />
+          <div className="text-sm">
+            <p className="font-semibold text-amber-900">Account not activated yet</p>
+            <p className="text-amber-800 text-xs mt-0.5">
+              {verificationStatus !== 'approved'
+                ? 'Your documents are under review (usually 24–72 hours).'
+                : 'Complete the road safety quiz to start accepting jobs.'}
+            </p>
+            <Link
+              to={verificationStatus !== 'approved' ? '/onboarding' : '/quiz'}
+              className="inline-block mt-2 text-xs font-bold text-primary underline"
+            >
+              {verificationStatus !== 'approved' ? 'View status' : 'Take quiz'}
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* Wallet warning */}
       {balance < 0 && (
@@ -309,9 +370,14 @@ export default function DriverAvailableJobs() {
                       <Store className="w-4 h-4 text-primary" />
                     </div>
                     <div>
-                      <p className="font-bold text-sm text-foreground">{order.shop_name}</p>
+                      <p className="font-bold text-sm text-foreground">
+                        {order.order_kind === 'courier' ? 'DashZW Courier' : order.shop_name}
+                      </p>
                       <p className="text-xs text-muted-foreground">
                         {order.created_date ? format(new Date(order.created_date), 'HH:mm') : '—'} · {PAYMENT_LABELS[order.payment_method] || order.payment_method}
+                        {order.order_kind === 'courier' && order.required_vehicle_type && (
+                          <span className="ml-1 capitalize">· {order.required_vehicle_type}</span>
+                        )}
                       </p>
                     </div>
                   </div>
@@ -333,7 +399,17 @@ export default function DriverAvailableJobs() {
                 <div className="flex items-start gap-2 text-xs text-muted-foreground">
                   <MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0 text-accent" />
                   <span>
-                    {order.delivery_address}, {order.delivery_city}
+                    {order.order_kind === 'courier' ? (
+                      <>
+                        Pickup: {order.pickup_address || order.shop_address}
+                        <br />
+                        Drop-off: {order.delivery_address}
+                      </>
+                    ) : (
+                      <>
+                        {order.delivery_address}, {order.delivery_city}
+                      </>
+                    )}
                     {order.distance_km && <span className="ml-1 text-primary font-medium">· {order.distance_km.toFixed(1)} km</span>}
                   </span>
                 </div>

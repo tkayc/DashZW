@@ -57,7 +57,8 @@ export default function DeliveryMap({
   deliveryAddress,
   driverPosition,
   secondDelivery = null,
-  className = '',
+  className = 'h-[280px]',
+  rounded = true,
 }) {
   const [shopPos,     setShopPos]     = useState(null);
   const [deliveryPos, setDeliveryPos] = useState(null);
@@ -79,7 +80,7 @@ export default function DeliveryMap({
   const center    = driverPosition || shopPos || deliveryPos || [-17.8292, 31.0522];
 
   return (
-    <div className={`rounded-2xl overflow-hidden border border-border ${className}`} style={{ height: 280 }}>
+    <div className={`overflow-hidden ${rounded ? 'rounded-2xl border border-border' : ''} ${className}`}>
       <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }} zoomControl={false}>
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

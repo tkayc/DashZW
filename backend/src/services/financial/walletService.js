@@ -3,7 +3,7 @@
  */
 import { getCollection, saveCollection } from '../../db/localDb.js';
 import { isPostgresEnabled, query } from '../../db/pg.js';
-import { getLedgerBalance, postTransaction, invalidateBalanceCache } from './ledgerService.js';
+import { getLedgerBalance, postTransaction, postOpeningBalance, invalidateBalanceCache } from './ledgerService.js';
 import {
   accountId,
   platformAccount,
@@ -96,6 +96,55 @@ export async function getBalance(ownerEmail, ownerType = null) {
     (x) => x.owner_email === ownerEmail && (!ownerType || x.owner_type === ownerType)
   );
   return w ? w.balance : 0;
+}
+
+/**
+ * One-time (idempotent) migration: the double-entry ledger was added on top
+ * of pre-existing legacy Wallet.json balances (e.g. seed data, or balances
+ * from before the ledger existed). Any such account has NO ledger entries,
+ * so getLedgerBalance() reads it as $0 — meaning the very first debit
+ * against a real, non-zero legacy balance fails with a false "insufficient
+ * balance" error inside postTransaction's per-leg check, even though
+ * getBalance() correctly reports the real (legacy) balance elsewhere.
+ *
+ * This posts a one-off opening-balance ledger entry for each legacy wallet
+ * that has a nonzero balance and no ledger history yet, so the ledger and
+ * the legacy number agree before any real transaction touches that account.
+ * Safe to call on every boot — accounts that already have ledger entries
+ * (already migrated, or created natively by the ledger) are skipped.
+ * Only relevant in JSON-file mode; Postgres mode uses the wallets table
+ * directly and never falls back to the ledger for balance truth.
+ */
+export async function reconcileLegacyWalletBalances() {
+  if (isPostgresEnabled()) return { migrated: 0 };
+
+  const wallets = getCollection('Wallet');
+  const ledgerRows = getCollection('LedgerTransaction');
+  const touchedAccounts = new Set(ledgerRows.map((r) => r.account_id));
+  const suspense = platformAccount(ACCOUNT_BUCKET.PLATFORM_CLEARING);
+
+  let migrated = 0;
+  for (const w of wallets) {
+    if (!w.owner_email || !w.balance) continue;
+    const amount = parseFloat(w.balance);
+    if (!Number.isFinite(amount) || Math.abs(amount) < 0.01) continue;
+
+    const bucket = resolveBucket(w.owner_type, w.owner_email);
+    const acct = accountId(w.owner_type === 'partner' ? 'merchant' : w.owner_type, w.owner_email, bucket);
+    if (touchedAccounts.has(acct)) continue;
+
+    try {
+      await postOpeningBalance(acct, suspense, amount, 'Legacy wallet balance migration');
+      touchedAccounts.add(acct);
+      migrated += 1;
+    } catch (err) {
+      console.error(`[DashZW] legacy wallet migration failed for ${acct}:`, err.message);
+    }
+  }
+  if (migrated > 0) {
+    console.log(`[DashZW] Migrated ${migrated} legacy wallet balance(s) into the ledger.`);
+  }
+  return { migrated };
 }
 
 async function ensurePgWallet(email, type) {
@@ -191,7 +240,11 @@ export async function creditWallet(email, type, amount, reason, txType = null, o
 
   const bucket = resolveBucket(type, email);
   const acct = accountId(type === 'partner' ? 'merchant' : type, email, bucket);
-  const escrow = platformAccount(ACCOUNT_BUCKET.PLATFORM_ESCROW);
+  // Money in from a customer/driver/merchant flows through the SAME platform
+  // clearing account that settlement/float/payout services debit from when
+  // paying out — using a separate 'escrow' bucket here meant nothing ever
+  // credited clearing, so it went negative on the very first settlement.
+  const escrow = platformAccount(ACCOUNT_BUCKET.PLATFORM_CLEARING);
 
   const result = await postTransaction({
     transactionType: txType || TX_TYPE.WALLET_CREDIT,
@@ -230,7 +283,7 @@ export async function debitWallet(email, type, amount, reason, txType = null, or
         : 'Insufficient wallet balance'
     );
   }
-  const escrow = platformAccount(ACCOUNT_BUCKET.PLATFORM_ESCROW);
+  const escrow = platformAccount(ACCOUNT_BUCKET.PLATFORM_CLEARING);
 
   const result = await postTransaction({
     transactionType: txType || TX_TYPE.WALLET_DEBIT,
@@ -271,7 +324,7 @@ export function getAccountBalances(entityType, entityEmail) {
             ACCOUNT_BUCKET.MERCHANT_CASH_CREDIT,
           ]
         : entityType === 'platform'
-          ? [ACCOUNT_BUCKET.PLATFORM_REVENUE, ACCOUNT_BUCKET.PLATFORM_PENDING, ACCOUNT_BUCKET.PLATFORM_ESCROW]
+          ? [ACCOUNT_BUCKET.PLATFORM_REVENUE, ACCOUNT_BUCKET.PLATFORM_PENDING, ACCOUNT_BUCKET.PLATFORM_CLEARING]
           : [ACCOUNT_BUCKET.CUSTOMER_WALLET];
 
   const out = {};

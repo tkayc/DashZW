@@ -48,6 +48,26 @@ export function invalidateBalanceCache(accountId) {
  * @param {Array<{accountId, side: 'debit'|'credit', amount}>} params.legs
  * @param {object} params.context - order_id, customer_id, driver_id, merchant_id, etc.
  */
+/**
+ * These account buckets are pass-through / obligation-tracking accounts,
+ * not real holdable balances:
+ *  - platform:...:clearing — suspense account routing money between wallet
+ *    payments and merchant/driver/platform payouts
+ *  - driver:...:cod_liability — tracks cash a driver owes back for a COD
+ *    order; it's a debt tracker, not money the driver holds, and legitimately
+ *    goes negative the moment cash is collected (before it's remitted)
+ * For COD orders in particular, physical cash never flows through the
+ * ledger before settlement, so both of these MUST be allowed to go negative
+ * temporarily — they represent money owed into the system, not money that's
+ * missing. Real customer/driver/merchant wallet-type accounts (wallet,
+ * earnings, tips, float, merchant pending/available) are NOT exempted here —
+ * those balances should never go negative, and still throw below.
+ */
+const SUSPENSE_BUCKET_SUFFIXES = [':clearing', ':cod_liability'];
+function isPassThroughSuspenseAccount(id) {
+  return typeof id === 'string' && SUSPENSE_BUCKET_SUFFIXES.some((suf) => id.endsWith(suf));
+}
+
 export async function postTransaction({
   transactionType,
   legs,
@@ -76,7 +96,7 @@ export async function postTransaction({
     const bal = getLedgerBalance(leg.accountId);
     const delta = leg.side === 'credit' ? leg.amount : -leg.amount;
     const newBal = parseFloat((bal + delta).toFixed(2));
-    if (newBal < -0.001) {
+    if (newBal < -0.001 && !isPassThroughSuspenseAccount(leg.accountId)) {
       throw new Error(
         `Insufficient balance on ${leg.accountId}: would be ${newBal.toFixed(2)}`
       );
@@ -133,6 +153,68 @@ export async function postTransaction({
   });
 
   return { transactionId, duplicate: false, entries: saved };
+}
+
+/**
+ * Post a single opening-balance entry directly, bypassing the normal
+ * non-negative-balance guard in postTransaction(). Used ONLY for one-time
+ * migration of pre-ledger legacy balances (see reconcileLegacyWalletBalances
+ * in walletService.js) — the counter-party is an equity/suspense account
+ * that is *expected* to go negative to reflect balances that existed before
+ * the ledger did. Never call this for a live customer/driver/merchant debit.
+ */
+export async function postOpeningBalance(targetAccountId, suspenseAccountId, amount, description) {
+  const amt = parseFloat(Math.abs(amount).toFixed(2));
+  if (amt <= 0) return null;
+
+  const legs = amount > 0
+    ? [
+        { accountId: targetAccountId, side: 'credit', amount: amt, description },
+        { accountId: suspenseAccountId, side: 'debit', amount: amt, description },
+      ]
+    : [
+        { accountId: targetAccountId, side: 'debit', amount: amt, description },
+        { accountId: suspenseAccountId, side: 'credit', amount: amt, description },
+      ];
+
+  const transactionId = genId('txn');
+  const now = new Date().toISOString();
+  const entries = legs.map((leg) => {
+    const prev = getLedgerBalance(leg.accountId);
+    const delta = leg.side === 'credit' ? leg.amount : -leg.amount;
+    const balanceAfter = parseFloat((prev + delta).toFixed(2));
+    balanceCache.set(leg.accountId, balanceAfter);
+    return {
+      transaction_id: transactionId,
+      transaction_type: TX_TYPE.LEGACY_WALLET_SYNC,
+      reference_number: `REF-${transactionId.slice(-8).toUpperCase()}`,
+      order_id: null,
+      customer_id: null,
+      driver_id: null,
+      merchant_id: null,
+      account_id: leg.accountId,
+      entry_side: leg.side,
+      amount: leg.amount,
+      balance_after: balanceAfter,
+      status: 'completed',
+      settlement_status: 'settled',
+      description: leg.description || description,
+      idempotency_key: `legacy_sync_${targetAccountId}`,
+      created_by: 'system_migration',
+      completed_date: now,
+      metadata: {},
+    };
+  });
+
+  const saved = await persistLedgerEntries(entries);
+  insertAuditLog({
+    action: 'ledger_opening_balance',
+    actor_email: 'system_migration',
+    target_type: TX_TYPE.LEGACY_WALLET_SYNC,
+    target_id: transactionId,
+    payload: { account_id: targetAccountId, amount: amt },
+  });
+  return { transactionId, entries: saved };
 }
 
 /**

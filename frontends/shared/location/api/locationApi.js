@@ -24,6 +24,8 @@ export function createLocationApi({ getApiBaseUrl, getToken }) {
     },
     quoteDelivery: (body) =>
       locationFetch('/api/location/quote', { method: 'POST', body: JSON.stringify(body) }),
+    quoteCourier: (body) =>
+      locationFetch('/api/location/courier/quote', { method: 'POST', body: JSON.stringify(body) }),
     listAddresses: () => locationFetch('/api/location/addresses'),
     getDefaultAddress: () => locationFetch('/api/location/addresses/default'),
     createAddress: (data) =>
@@ -61,6 +63,14 @@ export function createLocationApi({ getApiBaseUrl, getToken }) {
     getLiveOps: (filters = {}) => {
       const params = new URLSearchParams(filters);
       return locationFetch(`/api/location/live-ops?${params}`);
+    },
+    getDemandZones: ({ lat, lng, radius_km } = {}) => {
+      const params = new URLSearchParams();
+      if (lat != null) params.set('lat', String(lat));
+      if (lng != null) params.set('lng', String(lng));
+      if (radius_km != null) params.set('radius_km', String(radius_km));
+      const qs = params.toString();
+      return locationFetch(`/api/location/drivers/demand-zones${qs ? `?${qs}` : ''}`);
     },
   };
 }

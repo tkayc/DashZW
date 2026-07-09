@@ -76,14 +76,17 @@ function merchantDisplayName(order) {
 
 export async function notifyOrderPlaced(order) {
   const name = merchantDisplayName(order);
+  const isCourier = order.order_kind === 'courier';
   await createNotification({
     recipient_email: order.customer_email,
-    title: '✅ Order Placed!',
-    body: `Your order from ${name} has been received. Total: $${Number(order.total || 0).toFixed(2)}`,
+    title: isCourier ? '📦 Courier booked' : '✅ Order Placed!',
+    body: isCourier
+      ? `Your courier is booked. Share code ${order.delivery_code} with the recipient. Total: $${Number(order.total || 0).toFixed(2)}`
+      : `Your order from ${name} has been received. Total: $${Number(order.total || 0).toFixed(2)}`,
     type: 'order_placed',
     link: `/order/${order.id}`,
   });
-  if (order.partner_email) {
+  if (order.partner_email && !isCourier) {
     await createNotification({
       recipient_email: order.partner_email,
       title: '🛎️ New Order!',
@@ -164,7 +167,7 @@ export async function notifyOrderStatusChanged(order, newStatus) {
     await createNotification({
       recipient_email: '__drivers__',
       title: '🚀 New Job Available!',
-      body: `Order from ${name} is ready for pickup — earn ${order.driver_earning?.toFixed(2)}`,
+      body: `Order from ${name} is ready for pickup — earn ${Number(order.driver_earning || 0).toFixed(2)}`,
       type: 'job_available',
       link: '/',
     });
@@ -188,7 +191,7 @@ export async function notifyOrderStatusChanged(order, newStatus) {
       title: titles[status] || 'Order Update',
       body:
         status === ORDER_STATUS.DELIVERED || status === ORDER_STATUS.COMPLETED
-          ? `Order for ${order.customer_name} delivered. Payout: ${order.partner_payout?.toFixed(2)}`
+          ? `Order for ${order.customer_name} delivered. Payout: ${Number(order.partner_payout || 0).toFixed(2)}`
           : `${order.driver_name || 'Driver'} is handling the order for ${order.customer_name}.`,
       type: `order_${status}`,
       link: '/orders',

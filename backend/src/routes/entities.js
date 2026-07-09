@@ -6,6 +6,8 @@ import { notifyOrderStatusChanged } from '../services/notifications/notification
 import { ORDER_STATUS, normalizeOrderStatus } from '../domain/orderStates.js';
 import { settleOrder } from '../services/financial/settlementService.js';
 import { reserveFloatForOrder } from '../services/financial/driverFloatService.js';
+import { assertDriverCanAcceptJobs } from '../services/driver/onboardingService.js';
+import { canDriverFulfillVehicle, normalizeCourierVehicle } from '../domain/courierVehicles.js';
 
 const COLLECTIONS = Object.keys(localDb.entities);
 const router = Router();
@@ -351,6 +353,33 @@ async function patchEntity(req, res, collection, id) {
       body.driver_email = body.driver_email || req.user.email;
       body.driver_name = body.driver_name || req.user.full_name || req.user.email;
     }
+    // Gate: verified + quiz passed, and vehicle match for courier jobs
+    if (body.driver_email || body.status) {
+      try {
+        await assertDriverCanAcceptJobs(req.user.email);
+      } catch (err) {
+        return res.status(403).json({ message: err.message || 'Complete driver onboarding first' });
+      }
+      const requiredVehicle =
+        existing.required_vehicle_type ||
+        existing.pack_progress?.courier_meta?.required_vehicle_type ||
+        (String(existing.special_notes || '').startsWith('COURIER|')
+          ? String(existing.special_notes).split('|')[1]
+          : null);
+      const isCourier =
+        existing.order_kind === 'courier' ||
+        existing.merchant_category === 'courier' ||
+        String(existing.special_notes || '').startsWith('COURIER|');
+      if (isCourier && requiredVehicle) {
+        const profiles = await localDb.entities.DriverProfile.filter({ email: req.user.email }, '-updated_date', 1);
+        const driverVehicle = normalizeCourierVehicle(profiles[0]?.vehicle_type) || 'motorbike';
+        if (!canDriverFulfillVehicle(driverVehicle, requiredVehicle)) {
+          return res.status(403).json({
+            message: `This courier job needs a ${normalizeCourierVehicle(requiredVehicle) || requiredVehicle}. Your vehicle cannot take it.`,
+          });
+        }
+      }
+    }
   }
 
   if (!isAdmin(req.user)) {
@@ -381,7 +410,9 @@ async function patchEntity(req, res, collection, id) {
     const prev = normalizeOrderStatus(existing.status);
     const next = normalizeOrderStatus(body.status);
     if (prev !== next) {
-      void notifyOrderStatusChanged(item, body.status);
+      Promise.resolve(notifyOrderStatusChanged(item, body.status)).catch((err) =>
+        console.error('notifyOrderStatusChanged failed:', err?.message || err)
+      );
     }
     const settleStatuses = [ORDER_STATUS.DELIVERED, ORDER_STATUS.COMPLETED];
     if (settleStatuses.includes(next) && !item.settled_at) {

@@ -14,11 +14,12 @@ import AdminSection from '@/pages/AdminSection';
 import PlatformSettings from '@/pages/PlatformSettings';
 import AdminLiveMap from '@/pages/AdminLiveMap';
 import AdminFinancialDashboard from '@/pages/AdminFinancialDashboard';
+import AdminDriverVerification from '@/pages/AdminDriverVerification';
 import SplashScreen from '@shared/components/SplashScreen';
 import { useAppSplash } from '@shared/hooks/useAppSplash';
 
 const SECTIONS = [
-  'customers', 'drivers', 'merchants', 'orders', 'support', 'refunds',
+  'customers', 'merchants', 'orders', 'support', 'refunds',
   'disputes', 'reports', 'analytics', 'commissions', 'settlements',
   'coupons', 'notifications', 'audit', 'monitoring', 'roles',
 ];
@@ -60,6 +61,7 @@ function AppRoutes() {
       <Route element={<AdminLayout />}>
         <Route path="/" element={<AdminDashboard />} />
         <Route path="/users" element={<AdminUsers />} />
+        <Route path="/drivers" element={<AdminDriverVerification />} />
         <Route path="/settings" element={<PlatformSettings />} />
         <Route path="/live-map" element={<AdminLiveMap />} />
         <Route path="/financial" element={<AdminFinancialDashboard />} />

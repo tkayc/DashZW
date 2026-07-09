@@ -12,6 +12,12 @@ import { getRecentlyViewedIds } from '@/lib/recentlyViewed';
 import { isActiveOrderStatus } from '@/domain/orderStates';
 import { base44 } from '@/api';
 
+const normalizeCategoryKey = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+
 export default function Home() {
   const { user, isGuest } = useAuth();
   const { delivery, sort, setSort, sortOptions } = useDeliveryLocation();
@@ -23,7 +29,7 @@ export default function Home() {
     queryKey: ['merchants-discover', delivery?.lat, delivery?.lng, sort, activeCategory],
     queryFn: () =>
       delivery?.lat != null
-        ? locationApi.discoverMerchants({ lat: delivery.lat, lng: delivery.lng, sort, category: activeCategory || undefined })
+        ? locationApi.discoverMerchants({ lat: delivery.lat, lng: delivery.lng, sort })
         : base44.entities.Shop.list('-created_date', 50).then((shops) =>
             shops.filter((s) => s.approval_status !== 'rejected').map((s) => ({ ...s, distance_km: null }))
           ),
@@ -38,7 +44,9 @@ export default function Home() {
 
   const filtered = useMemo(() => {
     const list = merchants.filter((s) => s.approval_status !== 'rejected');
-    return activeCategory ? list.filter((s) => (s.category_id || s.category) === activeCategory) : list;
+    if (!activeCategory) return list;
+    const selected = normalizeCategoryKey(activeCategory);
+    return list.filter((s) => normalizeCategoryKey(s.category_id || s.category) === selected);
   }, [merchants, activeCategory]);
 
   const byRating = [...filtered].sort((a, b) => (b.rating || 0) - (a.rating || 0));
@@ -91,7 +99,7 @@ export default function Home() {
       </div>
 
       <HeroBanner ads={SHOP_DEAL_ADS} />
-      <CategoryScroll active={activeCategory} onSelect={setActiveCategory} />
+      <CategoryScroll activeCategory={activeCategory} onCategorySelect={setActiveCategory} />
 
       {activeOrders.length > 0 && (
         <div className="px-4 mt-4">

@@ -8,6 +8,7 @@ export default function Login() {
       portalTitle="DashZW Driver"
       portalSubtitle="Accept deliveries and earn"
       icon={Bike}
+      signUpPath="/signup"
     />
   );
 }

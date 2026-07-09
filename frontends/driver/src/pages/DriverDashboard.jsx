@@ -5,7 +5,7 @@ import { useRealtimeQuery as useQuery } from '@/api';
 import { base44 } from '@/api';
 import { useAuth } from '@/lib/AuthContext';
 import {
-  Power, Map, Bell, Star, TrendingUp, Wallet, ClipboardList, ChevronRight,
+  Power, Bell, Star, TrendingUp, Wallet, ClipboardList, ChevronRight,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ import {
   ORDER_STATUS,
 } from '@/domain/orderStates';
 import { toast } from 'sonner';
+import DemandHeatMap from '@/components/map/DemandHeatMap';
 
 const ONLINE_KEY = 'dashzw_driver_online';
 
@@ -113,15 +114,7 @@ export default function DriverDashboard() {
         </div>
       </div>
 
-      {/* Heat map placeholder */}
-      <div className="bg-card rounded-2xl border border-dashed border-border p-5 text-center">
-        <Map className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-        <p className="font-semibold text-sm">Demand heat map</p>
-        <p className="text-xs text-muted-foreground mt-1">
-          Hot zones and surge areas will appear here.
-        </p>
-        {/* TODO(maps): live demand heatmap */}
-      </div>
+      <DemandHeatMap />
 
       {/* Current orders */}
       <div className="bg-card rounded-2xl border border-border">
@@ -170,7 +163,7 @@ export default function DriverDashboard() {
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <Link to="/" className="bg-card border border-border rounded-2xl p-4 flex items-center gap-2 hover:bg-muted/40">
+        <Link to="/jobs" className="bg-card border border-border rounded-2xl p-4 flex items-center gap-2 hover:bg-muted/40">
           <Bell className="w-4 h-4 text-primary" />
           <span className="text-sm font-medium">Jobs & alerts</span>
         </Link>

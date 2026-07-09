@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import DashZWLogo from './DashZWLogo.jsx';
 
 /**
  * Branded splash — shown once per session when entering an app.
@@ -38,24 +39,8 @@ export default function SplashScreen({
             phase === 0 ? 'opacity-0 scale-50' : 'opacity-100 scale-100'
           }`}
         >
-          <div className="w-20 h-20 rounded-3xl bg-white/15 backdrop-blur flex items-center justify-center shadow-2xl border border-white/20">
-            <svg viewBox="0 0 48 48" className="w-12 h-12" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <ellipse cx="30" cy="34" rx="7" ry="7" stroke="white" strokeWidth="2.5" fill="none" />
-              <ellipse cx="12" cy="34" rx="5" ry="5" stroke="white" strokeWidth="2.5" fill="none" />
-              <path d="M17 34 L23 34 L28 24 L36 24" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
-              <path
-                d="M28 24 L30 18 L20 18 L17 24"
-                stroke="white"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <circle cx="30" cy="13" r="4" fill="white" opacity="0.9" />
-              <path d="M28 17 C26 20 25 23 26 25" stroke="white" strokeWidth="2" strokeLinecap="round" />
-              <path d="M4 20 L12 20" stroke="white" strokeWidth="2" strokeLinecap="round" opacity="0.6" />
-              <path d="M2 25 L10 25" stroke="white" strokeWidth="2" strokeLinecap="round" opacity="0.4" />
-              <path d="M5 15 L11 15" stroke="white" strokeWidth="2" strokeLinecap="round" opacity="0.3" />
-            </svg>
+          <div className="w-20 h-20 rounded-3xl bg-white/15 backdrop-blur flex items-center justify-center shadow-2xl border border-white/20 text-white">
+            <DashZWLogo className="w-12 h-12" />
           </div>
         </div>
         <div

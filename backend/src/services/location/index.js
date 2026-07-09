@@ -34,3 +34,5 @@ export {
   getOrderRoutes,
   getExternalNavigationUrl,
 } from './navigationService.js';
+export { quoteCourier, placeCourierOrder } from '../courier/courierService.js';
+export { getDemandZones } from './demandHeatmapService.js';

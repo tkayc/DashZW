@@ -30,7 +30,10 @@ import {
   getOrderRoutes,
   getExternalNavigationUrl,
   recordTrackingEvent,
+  quoteCourier,
+  getDemandZones,
 } from '../services/location/index.js';
+import { placeCourierOrder } from '../services/courier/courierService.js';
 
 const router = Router();
 
@@ -75,6 +78,20 @@ router.get('/merchants/discover', optionalAuth, async (req, res) => {
     const category = req.query.category || null;
     const merchants = await discoverMerchants({ lat, lng, sort, limit, category, localDb });
     res.json(merchants);
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+// Public courier quote — vehicle availability + pricing (no login required to browse)
+router.post('/courier/quote', optionalAuth, async (req, res) => {
+  try {
+    const { pickup, dropoff, vehicle_type } = req.body || {};
+    if (!pickup?.lat || !dropoff?.lat) {
+      return res.status(400).json({ message: 'pickup and dropoff coordinates are required' });
+    }
+    const quote = await quoteCourier({ pickup, dropoff, vehicle_type, localDb });
+    res.json(quote);
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
@@ -301,6 +318,23 @@ router.get('/navigation/url', (req, res) => {
     req.query.provider || 'google'
   );
   res.json({ url });
+});
+
+// ── Driver demand heatmap ────────────────────────────────────────────────────
+router.get('/drivers/demand-zones', async (req, res) => {
+  if (!isDriver(req.user) && !isAdmin(req.user)) {
+    return res.status(403).json({ message: 'Forbidden' });
+  }
+  try {
+    const snapshot = await getDemandZones({
+      lat: req.query.lat != null ? Number(req.query.lat) : null,
+      lng: req.query.lng != null ? Number(req.query.lng) : null,
+      radius_km: req.query.radius_km != null ? Number(req.query.radius_km) : null,
+    });
+    res.json(snapshot);
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
 });
 
 // ── Admin / partner live ops ─────────────────────────────────────────────────

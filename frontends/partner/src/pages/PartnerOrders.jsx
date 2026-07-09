@@ -68,9 +68,27 @@ function buildPackProgress(items = []) {
 export default function PartnerOrders({ shop }) {
   const qc = useQueryClient();
   const [filter, setFilter] = useState('active');
+  const [busyOrderIds, setBusyOrderIds] = useState(() => new Set());
+
+  const ordersQueryKey = ['partner-orders', shop?.id];
+
+  const setOrderBusy = (orderId, busy) => {
+    setBusyOrderIds((prev) => {
+      const next = new Set(prev);
+      if (busy) next.add(orderId);
+      else next.delete(orderId);
+      return next;
+    });
+  };
+
+  const patchOrdersCache = (orderId, patch) => {
+    qc.setQueryData(ordersQueryKey, (old = []) =>
+      old.map((o) => (o.id === orderId ? { ...o, ...patch } : o))
+    );
+  };
 
   const { data: orders = [], isLoading } = useQuery({
-    queryKey: ['partner-orders', shop?.id],
+    queryKey: ordersQueryKey,
     queryFn: () => base44.entities.Order.filter({ shop_id: shop.id }, '-created_date', 100),
     enabled: !!shop?.id,
   });
@@ -92,19 +110,30 @@ export default function PartnerOrders({ shop }) {
 
   const advance = async (order) => {
     const next = getPartnerNext(order.status);
-    if (!next) return;
+    if (!next || busyOrderIds.has(order.id)) return;
+
+    const previous = qc.getQueryData(ordersQueryKey);
+    patchOrdersCache(order.id, { status: next.status });
+    setOrderBusy(order.id, true);
+    toast.success(`Order marked as: ${next.label.replace('Mark ', '')}`);
+
     try {
       await base44.entities.Order.update(order.id, { status: next.status });
-      toast.success(`Order marked as: ${next.label.replace('Mark ', '')}`);
-      qc.invalidateQueries({ queryKey: ['partner-orders', shop?.id] });
     } catch (err) {
+      qc.setQueryData(ordersQueryKey, previous);
       toast.error(err?.message || 'Could not update order. Please try again.');
-      qc.invalidateQueries({ queryKey: ['partner-orders', shop?.id] });
+    } finally {
+      setOrderBusy(order.id, false);
     }
   };
 
   const cancel = async (order) => {
-    if (!confirm('Cancel this order?')) return;
+    if (!confirm('Cancel this order?') || busyOrderIds.has(order.id)) return;
+
+    const previous = qc.getQueryData(ordersQueryKey);
+    patchOrdersCache(order.id, { status: ORDER_STATUS.CANCELLED, cancel_reason: 'merchant' });
+    setOrderBusy(order.id, true);
+
     try {
       const walletRefund = parseFloat(order.wallet_applied || 0);
       if (walletRefund > 0 && order.customer_email) {
@@ -118,31 +147,40 @@ export default function PartnerOrders({ shop }) {
         status: ORDER_STATUS.CANCELLED,
         cancel_reason: 'merchant',
       });
-      qc.invalidateQueries({ queryKey: ['partner-orders', shop?.id] });
       toast.success(
         walletRefund > 0
           ? `Order cancelled — $${walletRefund.toFixed(2)} refunded to customer wallet`
           : 'Order cancelled'
       );
     } catch (err) {
+      qc.setQueryData(ordersQueryKey, previous);
       toast.error(err?.message || 'Could not cancel order. Please try again.');
-      qc.invalidateQueries({ queryKey: ['partner-orders', shop?.id] });
+    } finally {
+      setOrderBusy(order.id, false);
     }
   };
 
   const updatePackedQty = async (order, item, delta) => {
     const items = normalizeItems(order.items);
     const itemIndex = items.findIndex(i => i.menu_item_id === item.menu_item_id);
-    if (itemIndex < 0) return;
+    if (itemIndex < 0 || busyOrderIds.has(order.id)) return;
     const current = items[itemIndex];
     const nextPacked = Math.max(0, Math.min(current.quantity || 0, (current.packed_quantity || 0) + delta));
     items[itemIndex] = { ...current, packed_quantity: nextPacked };
+    const packProgress = buildPackProgress(items);
 
-    await base44.entities.Order.update(order.id, {
-      items,
-      pack_progress: buildPackProgress(items),
-    });
-    qc.invalidateQueries({ queryKey: ['partner-orders', shop?.id] });
+    const previous = qc.getQueryData(ordersQueryKey);
+    patchOrdersCache(order.id, { items, pack_progress: packProgress });
+    setOrderBusy(order.id, true);
+
+    try {
+      await base44.entities.Order.update(order.id, { items, pack_progress: packProgress });
+    } catch (err) {
+      qc.setQueryData(ordersQueryKey, previous);
+      toast.error(err?.message || 'Could not update packing progress.');
+    } finally {
+      setOrderBusy(order.id, false);
+    }
   };
 
   const markUnavailable = async (order, item) => {
@@ -251,6 +289,7 @@ export default function PartnerOrders({ shop }) {
           const normalizedItems = normalizeItems(order.items);
           const packProgress = order.pack_progress || buildPackProgress(normalizedItems);
           const pendingRequests = (order.adjustment_requests || []).filter(r => r.status === 'pending').length;
+          const isBusy = busyOrderIds.has(order.id);
           return (
             <div key={order.id} className="bg-card rounded-2xl border border-border overflow-hidden">
               <div className="p-4 border-b border-border flex items-center justify-between flex-wrap gap-2">
@@ -334,13 +373,13 @@ export default function PartnerOrders({ shop }) {
               {!isTerminalOrderStatus(order.status) && (
                 <div className="px-4 pb-4 flex gap-2">
                   {next && (
-                    <button onClick={() => advance(order)}
-                      className="flex-1 bg-primary text-primary-foreground text-xs font-semibold py-2 rounded-xl hover:bg-primary/90 transition-colors">
-                      {next.label}
+                    <button onClick={() => advance(order)} disabled={isBusy}
+                      className="flex-1 bg-primary text-primary-foreground text-xs font-semibold py-2 rounded-xl hover:bg-primary/90 transition-colors disabled:opacity-60 disabled:cursor-wait">
+                      {isBusy ? 'Updating…' : next.label}
                     </button>
                   )}
                   {[ORDER_STATUS.PENDING_ACCEPTANCE, ORDER_STATUS.ACCEPTED, ORDER_STATUS.PREPARING].includes(normalizeOrderStatus(order.status)) && (
-                    <button onClick={() => cancel(order)}
+                    <button onClick={() => cancel(order)} disabled={isBusy}
                       className="px-4 bg-destructive/10 text-destructive text-xs font-semibold py-2 rounded-xl hover:bg-destructive/20 transition-colors">
                       Cancel
                     </button>

@@ -121,6 +121,8 @@ export default function Checkout() {
   const [pricing, setPricing] = useState(null);
   const [rawDeliveryFee, setRawDeliveryFee] = useState(null);
   const [deliveryFee, setDeliveryFee] = useState(null);
+  const [feeError, setFeeError] = useState('');
+  const [feeRetryNonce, setFeeRetryNonce] = useState(0);
   const [adminPromoResult, setAdminPromoResult] = useState({ discountAmount: 0, freeDelivery: false });
   const [surge, setSurge] = useState({ active: false, multiplier: 1, reason: null });
   const [appliedPromo, setAppliedPromo] = useState(null);
@@ -241,12 +243,17 @@ export default function Checkout() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setFeeError('');
       if (isPickup) {
-        const p = await buildPricing(partnerSubtotal, 0);
-        if (!cancelled) {
-          setRawDeliveryFee(0);
-          setDeliveryFee(0);
-          setPricing(p);
+        try {
+          const p = await buildPricing(partnerSubtotal, 0);
+          if (!cancelled) {
+            setRawDeliveryFee(0);
+            setDeliveryFee(0);
+            setPricing(p);
+          }
+        } catch (err) {
+          if (!cancelled) setFeeError(err?.message || 'Could not calculate pricing');
         }
         return;
       }
@@ -258,20 +265,27 @@ export default function Checkout() {
         }
         return;
       }
-      const baseFee = await calcDeliveryFee(distanceKm, activeOrderCount);
-      const raw = applySurgeFee(baseFee, surge);
-      const fee = isFreeDelivery ? 0 : raw;
-      const p = await buildPricing(partnerSubtotal, fee);
-      if (!cancelled) {
-        setRawDeliveryFee(raw);
-        setDeliveryFee(fee);
-        setPricing(p);
+      try {
+        const baseFee = await calcDeliveryFee(distanceKm, activeOrderCount);
+        const raw = applySurgeFee(baseFee, surge);
+        const fee = isFreeDelivery ? 0 : raw;
+        const p = await buildPricing(partnerSubtotal, fee);
+        if (!cancelled) {
+          setRawDeliveryFee(raw);
+          setDeliveryFee(fee);
+          setPricing(p);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('[checkout] delivery fee calculation failed:', err);
+          setFeeError(err?.message || 'Could not calculate delivery fee — please retry');
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [distanceKm, isPickup, partnerSubtotal, activeOrderCount, isFreeDelivery, surge]);
+  }, [distanceKm, isPickup, partnerSubtotal, activeOrderCount, isFreeDelivery, surge, feeRetryNonce]);
 
   useEffect(() => {
     if (!pricing) {
@@ -303,10 +317,7 @@ export default function Checkout() {
       : null;
   const estimatedArrivalMins = distanceKm != null ? Math.round(20 + distanceKm * 3) : null;
 
-  useEffect(() => {
-    if (!items.length) navigate('/cart');
-  }, [items.length, navigate]);
-  if (!items.length) return null;
+  if (!items.length) { navigate('/cart'); return null; }
 
   const handleApplyCoupon = async () => {
     const code = couponInput.trim();
@@ -828,9 +839,22 @@ export default function Checkout() {
             <p className="text-sm text-muted-foreground text-center py-2">
               {calcingDist
                 ? 'Calculating distance…'
-                : (formatDeliveryLine(delivery) || gpsCoords || address.trim())
-                  ? 'Calculating delivery fee…'
-                  : 'Enter your address above'}
+                : feeError
+                  ? (
+                    <span className="text-red-600">
+                      {feeError}{' '}
+                      <button
+                        type="button"
+                        className="underline font-semibold"
+                        onClick={() => setFeeRetryNonce((n) => n + 1)}
+                      >
+                        Retry
+                      </button>
+                    </span>
+                  )
+                  : (formatDeliveryLine(delivery) || gpsCoords || address.trim())
+                    ? 'Calculating delivery fee…'
+                    : 'Enter your address above'}
             </p>
           )}
         </div>
@@ -843,6 +867,8 @@ export default function Checkout() {
           ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Placing Order…</>
           : calcingDist
             ? 'Finding your location…'
+            : feeError
+              ? 'Fix delivery fee error above'
             : !readyToOrder && (formatDeliveryLine(delivery) || gpsCoords || address.trim())
               ? 'Calculating delivery fee…'
             : finalTotal != null

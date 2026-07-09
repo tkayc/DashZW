@@ -12,19 +12,12 @@ export const notifyReplacementNeeded = (o, n) => invoke('notifications', 'notify
 export const notifyReplacementResolved = (o, n, l) => invoke('notifications', 'notifyReplacementResolved', [o, n, l]);
 export const notifyShopApproved = (e, n) => invoke('notifications', 'notifyShopApproved', [e, n]);
 
-import { invalidateCollection, getApiBaseUrl } from '../client.js';
+import { invalidateCollection } from '../client.js';
+import { subscribeSse } from '@shared/realtime/sseHub.js';
 
 export function subscribeToDbChanges(fn) {
-  const url = `${getApiBaseUrl()}/api/events`;
-  const es = new EventSource(url);
-  es.onmessage = (ev) => {
-    try {
-      const { collection } = JSON.parse(ev.data);
-      if (collection) invalidateCollection(collection);
-      if (!collection || collection === 'Notification') fn(collection);
-    } catch {
-      fn();
-    }
-  };
-  return () => es.close();
+  return subscribeSse(({ collection }) => {
+    if (collection) invalidateCollection(collection);
+    if (!collection || collection === 'Notification') fn(collection);
+  });
 }

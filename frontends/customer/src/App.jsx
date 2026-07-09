@@ -52,6 +52,7 @@ const ForgotPassword = lazy(() => import('@/pages/auth/ForgotPassword'));
 const ResetPassword = lazy(() => import('@/pages/auth/ResetPassword'));
 const EmailVerification = lazy(() => import('@/pages/auth/EmailVerification'));
 const Deals = lazy(() => import('@/pages/Deals'));
+const Courier = lazy(() => import('@/pages/Courier'));
 const NotificationCentre = lazy(() => import('@/pages/NotificationCentre'));
 
 function PageLoader() {
@@ -127,6 +128,7 @@ function AppRoutes() {
               <Route path="/search" element={<Search />} />
               <Route path="/explore" element={<Explore />} />
               <Route path="/deals" element={<Deals />} />
+              <Route path="/courier" element={<Courier />} />
               <Route path="/shop/:id" element={<ShopDetail />} />
               <Route path="/shop/:shopId/product/:productId" element={<ProductDetail />} />
               <Route path="/recommendations" element={<Recommendations />} />

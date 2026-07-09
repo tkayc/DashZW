@@ -3,7 +3,7 @@
  * TODO(Google Maps SDK): swap MapContainer for @react-google-maps/api when GOOGLE_MAPS_API_KEY is set in Vite env.
  */
 import React, { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Loader2, LocateFixed, ZoomIn, ZoomOut } from 'lucide-react';
@@ -32,12 +32,19 @@ const ICONS = {
 
 function FitBounds({ points, zoom = 14 }) {
   const map = useMap();
+  const key = (points || [])
+    .filter((p) => p?.lat != null && p?.lng != null)
+    .map((p) => `${Number(p.lat).toFixed(4)},${Number(p.lng).toFixed(4)}`)
+    .sort()
+    .join('|');
+
   useEffect(() => {
     const valid = (points || []).filter((p) => p?.lat != null && p?.lng != null);
     if (!valid.length) return;
     if (valid.length === 1) map.setView([valid[0].lat, valid[0].lng], zoom);
     else map.fitBounds(valid.map((p) => [p.lat, p.lng]), { padding: [40, 40] });
-  }, [points, zoom, map]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-fit when coords change
+  }, [key, zoom, map]);
   return null;
 }
 
@@ -76,9 +83,11 @@ export default function PlatformMap({
   driver,
   route = [],
   markers = [],
+  circles = [],
   onMapClick,
   showControls = true,
   className = '',
+  fitPoints,
 }) {
   const [tileUrl, setTileUrl] = useState('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
 
@@ -91,8 +100,10 @@ export default function PlatformMap({
       .catch(() => {});
   }, []);
 
-  const mapCenter = center || merchant || customer || driver || { lat: -26.1823, lng: 27.9985 };
-  const points = [merchant, customer, driver, ...markers].filter(Boolean);
+  const mapCenter = center || merchant || customer || driver || circles[0] || { lat: -26.1823, lng: 27.9985 };
+  const points = fitPoints?.length
+    ? fitPoints
+    : [merchant, customer, driver, ...markers, ...circles].filter(Boolean);
 
   if (offline) {
     return (
@@ -112,6 +123,24 @@ export default function PlatformMap({
       <MapContainer center={[mapCenter.lat, mapCenter.lng]} zoom={zoom} style={{ height: '100%', width: '100%' }} scrollWheelZoom>
         <TileLayer attribution='&copy; OpenStreetMap' url={tileUrl} />
         <FitBounds points={points} zoom={zoom} />
+        {circles.map((c, i) =>
+          c?.lat != null ? (
+            <Circle
+              key={c.id || i}
+              center={[c.lat, c.lng]}
+              radius={c.radius_m || 500}
+              pathOptions={{
+                color: c.stroke || c.color || '#ea580c',
+                fillColor: c.color || '#f59e0b',
+                fillOpacity: c.fillOpacity ?? 0.35,
+                weight: 1.5,
+                opacity: 0.7,
+              }}
+            >
+              {c.label && <Popup>{c.label}</Popup>}
+            </Circle>
+          ) : null
+        )}
         {merchant?.lat != null && (
           <Marker position={[merchant.lat, merchant.lng]} icon={ICONS.merchant}>
             <Popup>{merchant.label || 'Merchant'}</Popup>

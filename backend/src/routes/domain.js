@@ -8,6 +8,8 @@ import * as settlements from '../services/payments/settlements.js';
 import * as surgePricing from '../services/admin/surgePricing.js';
 import * as seedData from '../services/merchant/seedData.js';
 import * as financial from '../services/financial/index.js';
+import * as courier from '../services/courier/courierService.js';
+import * as driverOnboarding from '../services/driver/onboardingService.js';
 
 const modules = {
   finance,
@@ -18,6 +20,8 @@ const modules = {
   settlements,
   surgePricing,
   seedData,
+  courier,
+  driverOnboarding,
 };
 
 const ADMIN_ONLY = new Set([
@@ -36,6 +40,8 @@ const ADMIN_ONLY = new Set([
   'adminPromotions.updateAdminPromotion',
   'adminPromotions.deleteAdminPromotion',
   'surgePricing.setSurgeConfig',
+  'driverOnboarding.listPendingDrivers',
+  'driverOnboarding.setDriverVerification',
 ]);
 
 /** Direct wallet mutations — never callable by customer role */
@@ -120,6 +126,55 @@ router.post('/invoke', authMiddleware, async (req, res) => {
       const result = await orderEngine.cancelOwnOrder(req.user, args[0]);
       return res.json({ result });
     }
+    if (key === 'courier.placeCourierOrder') {
+      const result = await courier.placeCourierOrder(req.user, args[0] || {});
+      return res.json({ result });
+    }
+
+    // Driver onboarding — inject authenticated user where needed
+    if (key === 'driverOnboarding.registerDriver') {
+      // Public-ish: allow unauthenticated registration via invoke-public below;
+      // if authenticated, still allow (admin creating drivers).
+      const result = await driverOnboarding.registerDriver(args[0] || {});
+      return res.json({ result });
+    }
+    if (key === 'driverOnboarding.getDriverOnboardingStatus') {
+      const email = isCustomer(req.user) ? null : (args[0] || req.user.email);
+      const target = req.user.role === 'driver' ? req.user.email : (email || req.user.email);
+      if (req.user.role === 'driver' && target.toLowerCase() !== req.user.email.toLowerCase()) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+      const result = await driverOnboarding.getDriverOnboardingStatus(target);
+      return res.json({ result });
+    }
+    if (key === 'driverOnboarding.getRoadSafetyQuiz') {
+      return res.json({ result: driverOnboarding.getRoadSafetyQuiz() });
+    }
+    if (key === 'driverOnboarding.submitRoadSafetyQuiz') {
+      if (req.user.role !== 'driver' && !['admin', 'super_admin'].includes(req.user.role)) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+      const result = await driverOnboarding.submitRoadSafetyQuiz(req.user.email, args[0] || {});
+      return res.json({ result });
+    }
+    if (key === 'driverOnboarding.setDriverVerification') {
+      if (!['admin', 'super_admin'].includes(req.user.role)) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+      const result = await driverOnboarding.setDriverVerification(
+        req.user.email,
+        args[0],
+        args[1] || {}
+      );
+      return res.json({ result });
+    }
+    if (key === 'driverOnboarding.listPendingDrivers') {
+      if (!['admin', 'super_admin'].includes(req.user.role)) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+      const result = await driverOnboarding.listPendingDrivers();
+      return res.json({ result });
+    }
 
     // Partner-only driver top-up / withdraw
     if (key === 'finance.topUpDriver' || key === 'settlements.driverWithdraw' || key === 'financial.topUpDriverFloat') {
@@ -143,6 +198,8 @@ router.post('/invoke-public', async (req, res) => {
       'adminPromotions.validateAdminCoupon',
       'adminPromotions.calcAdminPromoDiscount',
       'financial.buildCustomerReceipt',
+      'driverOnboarding.registerDriver',
+      'driverOnboarding.getRoadSafetyQuiz',
     ]);
     const key = `${module}.${method}`;
     if (!publicAllow.has(key)) {

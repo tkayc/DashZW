@@ -67,6 +67,12 @@ export const AuthProvider = ({ children }) => {
     return u;
   };
 
+  const register = async (payload) => {
+    const { registerDriver } = await import('@/api');
+    const result = await registerDriver(payload);
+    return result;
+  };
+
   const logout = () => {
     setUser(null);
     setIsAuth(false);
@@ -76,7 +82,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated, isLoadingAuth, login, register: null, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated, isLoadingAuth, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

@@ -34,7 +34,52 @@ const PAYMENT_LABELS = {
   ecocash: 'EcoCash', onemoney: 'OneMoney', innbucks: 'InnBucks', cash_on_delivery: 'Cash on Delivery',
 };
 
-function ActiveDeliveryCard({ order, onUpdateStatus }) {
+function DeliveryCodePanel({ codeInput, setCodeInput, verifying, onConfirm, onCancel, compact = false }) {
+  return (
+    <div className={compact ? 'space-y-3' : 'px-4 py-4 space-y-4'}>
+      <div className="flex items-center gap-2.5">
+        <div className="w-9 h-9 rounded-xl bg-green-600/10 flex items-center justify-center shrink-0">
+          <KeyRound className="w-4 h-4 text-green-700" />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-foreground">Delivery code</p>
+          <p className="text-xs text-muted-foreground">Ask the customer for their 4-digit code</p>
+        </div>
+      </div>
+      <Input
+        placeholder="• • • •"
+        value={codeInput}
+        onChange={e => setCodeInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+        className="text-center text-3xl font-bold tracking-[0.5em] rounded-2xl bg-background h-14 border-2 focus-visible:ring-green-600/30"
+        maxLength={4}
+        inputMode="numeric"
+        autoComplete="one-time-code"
+      />
+      <div className="flex gap-2">
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 py-3 rounded-xl border border-border text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
+          >
+            Cancel
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={verifying || codeInput.length !== 4}
+          className={`${onCancel ? 'flex-1' : 'w-full'} py-3 rounded-xl bg-green-600 text-white font-semibold text-sm hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors shadow-sm`}
+        >
+          {verifying ? <Loader2 className="w-4 h-4 animate-spin" /> : <PackageCheck className="w-4 h-4" />}
+          Confirm delivery
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ActiveDeliveryCard({ order, onUpdateStatus, immersive = false }) {
   const navigate = useNavigate();
   const [showMap, setShowMap] = useState(false);
   const [showCodeEntry, setShowCodeEntry] = useState(false);
@@ -44,6 +89,7 @@ function ActiveDeliveryCard({ order, onUpdateStatus }) {
 
   const status = normalizeOrderStatus(order.status);
   const nextStep = DRIVER_STATUS_FLOW[status];
+  const isInTransit = status === ORDER_STATUS.IN_TRANSIT;
 
   const handleNextStatus = () => {
     if (!nextStep) return;
@@ -65,9 +111,90 @@ function ActiveDeliveryCard({ order, onUpdateStatus }) {
     }
     setVerifying(false);
     setShowCodeEntry(false);
-    // Delivered then Completed (settlement-ready terminal state)
     onUpdateStatus(order, ORDER_STATUS.DELIVERED);
   };
+
+  if (isInTransit) {
+    return (
+      <div
+        className={`flex flex-col bg-card border border-border overflow-hidden border-l-4 border-l-cyan-500 shadow-sm ${
+          immersive
+            ? '-mx-4 -mt-4 lg:-mx-6 lg:-mt-6 min-h-[calc(100dvh-4rem)] lg:min-h-[calc(100dvh-3rem)] rounded-none lg:rounded-2xl'
+            : 'rounded-2xl min-h-[min(72dvh,640px)]'
+        }`}
+      >
+        <div className="shrink-0 px-4 py-3 border-b border-border bg-card/95 backdrop-blur-sm">
+          <div className="flex items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="font-bold text-foreground">{order.customer_name || 'Customer'}</p>
+                <Badge className={`text-[10px] ${STATUS_COLOR[status] || ''}`}>
+                  {ORDER_STATUS_LABELS[status]}
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                {order.delivery_address}, {order.delivery_city}
+                {order.distance_km != null && <span className="ml-1 text-foreground/70">· {order.distance_km.toFixed(1)} km</span>}
+              </p>
+            </div>
+            <div className="text-right shrink-0">
+              <p className="text-xs text-muted-foreground">You earn</p>
+              <p className="text-sm font-bold text-green-700">{formatUSD(order.driver_earning)}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 mt-2.5">
+            {order.customer_phone && (
+              <a
+                href={`tel:${order.customer_phone}`}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-primary bg-primary/10 px-2.5 py-1.5 rounded-lg"
+              >
+                <Phone className="w-3.5 h-3.5" />
+                Call
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() => navigate(`/navigate/${order.id}`)}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground bg-muted px-2.5 py-1.5 rounded-lg hover:bg-muted/80 transition-colors"
+            >
+              <Navigation className="w-3.5 h-3.5" />
+              Turn-by-turn
+            </button>
+            {order.delivery_notes && (
+              <span className="text-[11px] text-muted-foreground truncate flex-1" title={order.delivery_notes}>
+                💬 {order.delivery_notes}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-[240px] relative bg-muted/30">
+          <DeliveryMap
+            shopAddress={order.shop_address || order.shop_name}
+            deliveryAddress={`${order.delivery_address}, ${order.delivery_city}`}
+            driverPosition={driverPos}
+            className="h-full w-full"
+            rounded={false}
+          />
+          {driverPos && (
+            <div className="absolute top-3 left-3 z-[1000] flex items-center gap-1.5 bg-card/95 backdrop-blur-sm border border-border px-2.5 py-1.5 rounded-full text-[11px] font-medium text-foreground shadow-sm">
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              Live GPS
+            </div>
+          )}
+        </div>
+
+        <div className="shrink-0 border-t border-border bg-card shadow-[0_-12px_40px_rgba(0,0,0,0.06)]">
+          <DeliveryCodePanel
+            codeInput={codeInput}
+            setCodeInput={setCodeInput}
+            verifying={verifying}
+            onConfirm={handleDeliverWithCode}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-card rounded-2xl border border-border overflow-hidden border-l-4 border-l-accent">
@@ -157,37 +284,18 @@ function ActiveDeliveryCard({ order, onUpdateStatus }) {
               <PackageCheck className="w-4 h-4" /> {nextStep.label}
             </button>
           )}
-          {status === ORDER_STATUS.IN_TRANSIT && !showCodeEntry && (
-            <button onClick={() => setShowCodeEntry(true)}
-              className="flex-1 flex items-center justify-center gap-2 bg-green-600 text-white font-semibold text-sm py-2.5 rounded-xl hover:bg-green-700 transition-colors">
-              <KeyRound className="w-4 h-4" /> Enter Delivery Code
-            </button>
-          )}
         </div>
 
-        {showCodeEntry && status === ORDER_STATUS.IN_TRANSIT && (
-          <div className="bg-muted/50 rounded-xl p-4 space-y-3">
-            <p className="text-sm font-semibold text-foreground text-center">
-              Ask the customer for their 4-digit delivery code
-            </p>
-            <Input
-              placeholder="0000"
-              value={codeInput}
-              onChange={e => setCodeInput(e.target.value.replace(/\D/g,'').slice(0,4))}
-              className="text-center text-2xl font-bold tracking-widest rounded-xl bg-background"
-              maxLength={4}
+        {showCodeEntry && (
+          <div className="bg-muted/50 rounded-xl p-4">
+            <DeliveryCodePanel
+              compact
+              codeInput={codeInput}
+              setCodeInput={setCodeInput}
+              verifying={verifying}
+              onConfirm={handleDeliverWithCode}
+              onCancel={() => { setShowCodeEntry(false); setCodeInput(''); }}
             />
-            <div className="flex gap-2">
-              <button onClick={() => { setShowCodeEntry(false); setCodeInput(''); }}
-                className="flex-1 py-2 rounded-xl border border-border text-sm font-medium text-muted-foreground hover:bg-muted">
-                Cancel
-              </button>
-              <button onClick={handleDeliverWithCode} disabled={verifying || codeInput.length !== 4}
-                className="flex-1 py-2 rounded-xl bg-green-600 text-white font-semibold text-sm hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2">
-                {verifying ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                Confirm Delivery
-              </button>
-            </div>
           </div>
         )}
       </div>
@@ -206,6 +314,7 @@ export default function DriverActiveDeliveries() {
   });
 
   const active = orders.filter((o) => !isTerminalOrderStatus(o.status));
+  const hasInTransit = active.some((o) => normalizeOrderStatus(o.status) === ORDER_STATUS.IN_TRANSIT);
   const completed = orders
     .filter((o) => {
       const s = normalizeOrderStatus(o.status);
@@ -245,11 +354,13 @@ export default function DriverActiveDeliveries() {
   }
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-bold text-foreground">My Deliveries</h1>
-        <p className="text-muted-foreground text-sm">{active.length} active · {completed.length} completed</p>
-      </div>
+    <div className={hasInTransit ? 'space-y-3' : 'space-y-5'}>
+      {!hasInTransit && (
+        <div>
+          <h1 className="text-xl font-bold text-foreground">My Deliveries</h1>
+          <p className="text-muted-foreground text-sm">{active.length} active · {completed.length} completed</p>
+        </div>
+      )}
 
       {active.length === 0 && (
         <div className="bg-card rounded-2xl border border-border p-12 text-center">
@@ -260,7 +371,12 @@ export default function DriverActiveDeliveries() {
       )}
 
       {active.map(order => (
-        <ActiveDeliveryCard key={order.id} order={order} onUpdateStatus={updateStatus} />
+        <ActiveDeliveryCard
+          key={order.id}
+          order={order}
+          onUpdateStatus={updateStatus}
+          immersive={hasInTransit && normalizeOrderStatus(order.status) === ORDER_STATUS.IN_TRANSIT}
+        />
       ))}
 
       {completed.length > 0 && (

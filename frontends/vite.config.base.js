@@ -12,7 +12,18 @@ export function createAppViteConfig(appName, port) {
       port,
       host: true,
       proxy: {
-        '/api': { target: 'http://localhost:3001', changeOrigin: true },
+        '/api': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+          configure: (proxy) => {
+            proxy.on('proxyRes', (proxyRes, req) => {
+              if (req.url?.includes('/events')) {
+                proxyRes.headers['cache-control'] = 'no-cache';
+                proxyRes.headers['x-accel-buffering'] = 'no';
+              }
+            });
+          },
+        },
         '/uploads': { target: 'http://localhost:3001', changeOrigin: true },
       },
     },

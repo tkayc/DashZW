@@ -19,6 +19,7 @@ import { UPLOADS_ROOT } from './services/storage/storage.js';
 import { seedDatabase } from './services/merchant/seedData.js';
 import { runOrderTimeoutCheck } from './services/orders/orderEngine.js';
 import { ensureDemoUsers } from './services/authentication/users.js';
+import { reconcileLegacyWalletBalances } from './services/financial/walletService.js';
 import { subscribeToDbChanges } from './db/store.js';
 import { checkPostgres, isPostgresEnabled, ensureSchemaPatches } from './db/pg.js';
 import { assertJwtConfigured } from './services/authentication/middleware.js';
@@ -137,6 +138,9 @@ app.get(`/api/${API_VERSION}/events`, sseHandler);
 Promise.resolve()
   .then(() => ensureSchemaPatches())
   .then(() => ensureDemoUsers())
+  // Backfill ledger opening balances for any pre-ledger legacy wallet balances
+  // (JSON mode only; no-op under PostgreSQL). Idempotent — safe on every boot.
+  .then(() => reconcileLegacyWalletBalances())
   .catch((e) => console.error('[DashZW] startup schema/demo-user init failed:', e?.message || e));
 
 Promise.resolve()
